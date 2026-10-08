@@ -77,6 +77,7 @@ export interface AppSettings {
   welcomeManuallyHidden: boolean;
   limitNotificationsEnabled: boolean;
   quoteRefreshSeconds: 30 | 60 | 120 | 300;
+  accountSyncEnabled: boolean;
 }
 
 export interface AppState {
@@ -103,6 +104,7 @@ export const DEFAULT_STATE: AppState = {
     welcomeManuallyHidden: false,
     limitNotificationsEnabled: true,
     quoteRefreshSeconds: 30,
+    accountSyncEnabled: false,
   },
   background: { selectedId: 'scene-01', brightness: 0.58 },
 };

@@ -1,9 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AppSettings, AppState } from '../domain/types';
 import type { BackgroundImage } from '../data/backgrounds';
+import { ACCOUNT_SYNC_META_KEY } from '../data/accountSync';
+import { STATE_KEY } from '../data/storage';
 import { removeUploadedBackground, saveUploadedBackground } from '../data/images';
 import { Dialog } from './Dialog';
 import { Icon } from './Icons';
+
+type AccountSyncPhase = 'disabled' | 'conflict' | 'error' | 'pending' | 'written' | 'ready';
+
+interface AccountSyncStatus {
+  enabled: boolean;
+  phase: AccountSyncPhase;
+  message: string;
+}
+
+type AccountSyncMessage =
+  | { type: 'ACCOUNT_SYNC_STATUS' }
+  | { type: 'ACCOUNT_SYNC_SET_ENABLED'; enabled: boolean }
+  | { type: 'ACCOUNT_SYNC_RESOLVE'; choice: 'local' | 'sync' }
+  | { type: 'ACCOUNT_SYNC_RETRY' };
 
 interface SettingsDrawerProps {
   state: AppState;
@@ -29,8 +45,67 @@ export function SettingsDrawer({ state, backgrounds, onClose, onSaveKeys, onBack
   const [testing, setTesting] = useState(false);
   const [enabling, setEnabling] = useState(false);
   const [restoringWelcome, setRestoringWelcome] = useState(false);
+  const [accountSyncStatus, setAccountSyncStatus] = useState<AccountSyncStatus | null>(null);
+  const [accountSyncBusy, setAccountSyncBusy] = useState(false);
+  const syncRequestId = useRef(0);
+  const mounted = useRef(false);
+  const extensionAvailable = typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
 
   useEffect(() => { setFugleKey(state.settings.fugleKey); setFinnhubKey(state.settings.finnhubKey); setBrightness(state.background.brightness); }, [state.settings.fugleKey, state.settings.finnhubKey, state.background.brightness]);
+
+  useEffect(() => {
+    mounted.current = true;
+    if (!extensionAvailable) return () => { mounted.current = false; };
+
+    let timer: number | undefined;
+    const refreshStatus = async () => {
+      const requestId = ++syncRequestId.current;
+      try {
+        const response = await chrome.runtime.sendMessage({ type: 'ACCOUNT_SYNC_STATUS' });
+        if (!mounted.current || requestId !== syncRequestId.current) return;
+        if (response?.error) throw new Error(response.error);
+        if (!response?.status) throw new Error('無法讀取同步狀態');
+        setAccountSyncStatus(response.status as AccountSyncStatus);
+      } catch (error) {
+        if (!mounted.current || requestId !== syncRequestId.current) return;
+        setAccountSyncStatus({ enabled: state.settings.accountSyncEnabled, phase: 'error', message: error instanceof Error ? error.message : '無法讀取同步狀態' });
+      }
+    };
+    const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName !== 'local' || (!changes[ACCOUNT_SYNC_META_KEY] && !changes[STATE_KEY])) return;
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => { timer = undefined; void refreshStatus(); }, 80);
+    };
+
+    void refreshStatus();
+    chrome.storage.onChanged.addListener(handleStorageChange);
+    return () => {
+      mounted.current = false;
+      syncRequestId.current += 1;
+      if (timer !== undefined) window.clearTimeout(timer);
+      chrome.storage.onChanged.removeListener(handleStorageChange);
+    };
+  }, [extensionAvailable, state.settings.accountSyncEnabled]);
+
+  async function runAccountSyncAction(message: AccountSyncMessage) {
+    if (!extensionAvailable || accountSyncBusy) return;
+    setAccountSyncBusy(true);
+    const requestId = ++syncRequestId.current;
+    try {
+      const response = await chrome.runtime.sendMessage(message);
+      if (response?.error) throw new Error(response.error);
+      if (!response?.status) throw new Error('未收到同步狀態，請稍後再試。');
+      if (mounted.current && requestId === syncRequestId.current) setAccountSyncStatus(response.status as AccountSyncStatus);
+    } catch (error) {
+      if (mounted.current && requestId === syncRequestId.current) setAccountSyncStatus({
+        enabled: state.settings.accountSyncEnabled,
+        phase: 'error',
+        message: error instanceof Error ? error.message : '同步操作失敗，請稍後再試。',
+      });
+    } finally {
+      if (mounted.current) setAccountSyncBusy(false);
+    }
+  }
 
   async function saveKeys(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -95,9 +170,9 @@ export function SettingsDrawer({ state, backgrounds, onClose, onSaveKeys, onBack
         <div className="settings-section-heading"><span className="section-icon"><Icon name="refresh" /></span><div><h3>行情來源</h3><p>使用個人 API 金鑰取得行情快照。</p></div></div>
         <form className="stack-form" onSubmit={saveKeys}>
           <label>Fugle 台股 API Key<input type="password" value={fugleKey} onChange={(event) => { setFugleKey(event.target.value); setSavedKeys(false); }} autoComplete="off" spellCheck="false" placeholder="貼上 Fugle API Key" /></label>
-          <a className="provider-link" href="https://developer.fugle.tw/" target="_blank" rel="noreferrer">前往 Fugle 開發者平台 <Icon name="arrow" size={13} /></a>
+          <div className="provider-link-row"><a className="provider-link" href="https://developer.fugle.tw/" target="_blank" rel="noreferrer">前往 Fugle 開發者平台 <Icon name="arrow" size={13} /></a><span className="free-apply-badge">可免費申請</span></div>
           <label>Finnhub 美股 Token<input type="password" value={finnhubKey} onChange={(event) => { setFinnhubKey(event.target.value); setSavedKeys(false); }} autoComplete="off" spellCheck="false" placeholder="貼上 Finnhub Token" /></label>
-          <a className="provider-link" href="https://finnhub.io/dashboard" target="_blank" rel="noreferrer">前往 Finnhub 控制台 <Icon name="arrow" size={13} /></a>
+          <div className="provider-link-row"><a className="provider-link" href="https://finnhub.io/dashboard" target="_blank" rel="noreferrer">前往 Finnhub 控制台 <Icon name="arrow" size={13} /></a><span className="free-apply-badge">可免費申請</span></div>
           <div className="inline-action"><button type="submit" className="secondary-button" disabled={savingKeys}>{savingKeys ? '儲存中…' : '儲存 API 金鑰'}</button>{savedKeys && <span className="success-note"><Icon name="check" size={15} />已儲存</span>}</div>
         </form>
         <p className="privacy-note">金鑰只保存在本機擴充功能儲存區，僅用於呼叫對應行情 API，不會寫入日誌。</p>
@@ -114,6 +189,17 @@ export function SettingsDrawer({ state, backgrounds, onClose, onSaveKeys, onBack
         <div className="settings-section-heading"><span className="section-icon"><Icon name="bell" /></span><div><h3>台股漲跌停通知</h3><p>僅使用 Fugle 成交回報的限價旗標，不參考委買委賣或推算價格。</p></div></div>
         <label className="setting-toggle-row"><span><b>啟用漲跌停通知</b><small>僅限台股，每檔每方向每日一次；須開啟到價提醒並允許瀏覽器通知。</small></span><input type="checkbox" aria-label="台股漲跌停通知" checked={state.settings.limitNotificationsEnabled} onChange={(event) => void savePreference({ limitNotificationsEnabled: event.target.checked })} /></label>
         {(!state.settings.notificationsEnabled || state.settings.notificationPermission !== 'granted') && <p className="limit-notification-prompt" role="note">目前通知尚未就緒。請開啟到價提醒並允許瀏覽器通知後，才會傳送漲跌停提醒。</p>}
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-heading"><span className="section-icon"><Icon name="refresh" /></span><div><h3>Chrome 帳號同步</h3><p>選擇是否將部分投資組合資料同步至 Chrome 帳戶，預設關閉。</p></div></div>
+        <label className="setting-toggle-row"><span><b>同步投資組合</b><small>同步股票、分區、成本、提醒門檻、一般偏好與內建背景。</small></span><input type="checkbox" aria-label="Chrome 帳號同步" checked={state.settings.accountSyncEnabled} disabled={!extensionAvailable || accountSyncBusy} onChange={(event) => void runAccountSyncAction({ type: 'ACCOUNT_SYNC_SET_ENABLED', enabled: event.target.checked })} /></label>
+        <p className="account-sync-local-note">API 金鑰、通知權限與總開關、自訂背景圖片仍只保存在這部裝置。兩台裝置需登入同一 Google 帳戶、開啟 Chrome 同步，並使用相同的擴充功能 ID。</p>
+        {!extensionAvailable ? <p className="account-sync-status" role="note">本機預覽不支援 Chrome 帳號同步；請載入 Chrome 擴充功能後使用。</p> : <>
+          <p className={`account-sync-status${accountSyncStatus?.phase === 'error' ? ' error' : ''}`} role={accountSyncStatus?.phase === 'error' ? 'alert' : 'status'}>{accountSyncBusy ? '同步設定處理中…' : accountSyncStatus?.message ?? '正在讀取同步狀態…'}</p>
+          {accountSyncStatus?.phase === 'conflict' && <div className="account-sync-actions"><button type="button" className="secondary-button" onClick={() => void runAccountSyncAction({ type: 'ACCOUNT_SYNC_RESOLVE', choice: 'local' })} disabled={accountSyncBusy}>使用這台電腦的設定</button><button type="button" className="secondary-button" onClick={() => void runAccountSyncAction({ type: 'ACCOUNT_SYNC_RESOLVE', choice: 'sync' })} disabled={accountSyncBusy}>使用已同步的設定</button></div>}
+          {(accountSyncStatus?.phase === 'pending' || accountSyncStatus?.phase === 'error') && <button type="button" className="secondary-button full-action" onClick={() => void runAccountSyncAction({ type: 'ACCOUNT_SYNC_RETRY' })} disabled={accountSyncBusy}>{accountSyncBusy ? '重試中…' : '重試同步'}</button>}
+        </>}
       </section>
 
       {state.settings.welcomeManuallyHidden && <section className="settings-section">

@@ -33,7 +33,8 @@ test('persists limit notice and refresh interval settings in the drawer', async 
   await expect(limitToggle).toBeVisible();
   await expect(refreshInterval).toBeVisible();
   await mkdir(artifacts, { recursive: true });
-  await page.screenshot({ path: resolve(artifacts, 'limit-notification-settings.png'), fullPage: true });
+  await drawer.locator('.settings-scroll').evaluate((element) => { element.scrollTop = 0; });
+  await page.screenshot({ path: resolve(artifacts, 'free-api-settings.png'), fullPage: true });
 
   await refreshInterval.selectOption('120');
   await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('stockDesktopState.v1') ?? 'null')?.settings.quoteRefreshSeconds)).toBe(120);

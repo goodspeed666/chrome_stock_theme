@@ -45,7 +45,9 @@ async function installWorkerMocks(worker: Worker) {
       const mode = current.__limitMode;
       current.__limitLastTime = mode === 'stale' ? Date.now() - 130_000
         : mode === 'out-of-order' ? Date.now() - 30_000
-          : Math.max(Date.now(), current.__limitLastTime + 1);
+          // fetchFugleQuote captures its validation time before awaiting fetch;
+          // keep the mock trade timestamp safely in the past across ms boundaries.
+          : Math.max(Date.now() - 1_000, current.__limitLastTime + 1);
       return Promise.resolve(new Response(JSON.stringify({
         lastTrade: { price: 100, time: current.__limitLastTime * 1000 },
         previousClose: 99,

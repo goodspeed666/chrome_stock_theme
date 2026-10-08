@@ -125,6 +125,16 @@ test('shows compact cards for quotes, gains, empty symbols, long names, alerts, 
         averageCost: 1, shares: 1e100, gainDisplay: 'money', alert: {}, alertLatches: { above: false, below: false }, quoteStatus: 'live',
         quote: { price: 100, previousClose: 99, dayChange: 1, dayChangePercent: 1.01, timestamp: now - 30_000, status: 'live', source: 'Fugle' },
       },
+      {
+        id: 'compact-tw-money', market: 'TW', symbol: '8042', name: '金山電', order: 5, groupId: 'group-fixture',
+        averageCost: 119, shares: 1000, gainDisplay: 'percent', alert: {}, alertLatches: { above: false, below: false }, quoteStatus: 'live',
+        quote: { price: 137, previousClose: 136, dayChange: 1, dayChangePercent: 0.74, timestamp: now - 20_000, status: 'live', source: 'Fugle' },
+      },
+      {
+        id: 'compact-us-low-price', market: 'US', symbol: 'XYZ', name: '低價測試', order: 6, groupId: 'group-fixture',
+        gainDisplay: 'percent', alert: { below: 99.5 }, alertLatches: { above: false, below: false }, quoteStatus: 'live',
+        quote: { price: 99.5, previousClose: 98.5, dayChange: 1, dayChangePercent: 1.02, timestamp: now - 20_000, status: 'live', source: 'Finnhub' },
+      },
     ],
     settings: { ...DEFAULT_STATE.settings, fugleKey: '', finnhubKey: '', notificationsEnabled: false },
   };
@@ -134,18 +144,54 @@ test('shows compact cards for quotes, gains, empty symbols, long names, alerts, 
   await page.goto('/');
 
   const group = page.getByRole('region', { name: '測試資料分區' });
-  await expect(group.locator('.stock-card')).toHaveCount(5);
+  await expect(group.locator('.stock-card')).toHaveCount(7);
   const taiwan = group.getByRole('article', { name: /台積電測試資料.*2330/ });
   const empty = group.getByRole('article', { name: /測試長名稱.*0050/ });
   const berkshire = group.getByRole('article', { name: /Berkshire Hathaway.*BRK\.B/ });
   const stale = group.getByRole('article', { name: /Tesla 測試報價.*TSLA/ });
   const hugeGain = group.getByRole('article', { name: /極端損益測試.*9999/ });
-  await expect(taiwan.getByText('NT$1,005.50')).toBeVisible();
+  const gainExample = group.getByRole('article', { name: /金山電.*8042/ });
+  const lowQuote = group.getByRole('article', { name: /低價測試.*XYZ/ });
+  await expect(taiwan.getByText('1,005')).toBeVisible();
   await expect(taiwan.getByRole('button', { name: /損益顯示切換/ })).toBeVisible();
   await expect(empty.getByText('尚未連接行情')).toBeVisible();
-  await expect(berkshire.getByText('US$512,345.67')).toBeVisible();
+  await expect(berkshire.getByText('512,345')).toBeVisible();
+  await expect(lowQuote.locator('.current-price')).toHaveText('99.50');
+  await expect(lowQuote.locator('.alert-summary')).toContainText('低於 US$99.50');
+  await expect(berkshire.locator('.gain-panel strong')).toHaveText('+US$5,586.42');
   await expect(stale.locator('.quote-error-note')).toContainText('最近成交仍保留');
   await expect(stale.getByRole('button', { name: '重試' })).toBeVisible();
+  await expect(taiwan.locator('.quote-footer')).not.toContainText('Fugle');
+  await expect(taiwan.locator('.quote-update-time')).toHaveAttribute('aria-label', /最近報價更新時間 .*（台北時間）/);
+  const gainToggle = gainExample.getByRole('button', { name: /損益顯示切換/ });
+  await expect(gainExample.locator('.stock-values-row')).not.toHaveClass(/has-long-gain/);
+  await expect(gainToggle.locator('strong')).toHaveText('+15.13%');
+  await expect(gainToggle.locator('.gain-money-hint')).toHaveText('+$18,000');
+  const hintMetrics = await gainToggle.evaluate((button) => {
+    const hint = button.querySelector<HTMLElement>('.gain-money-hint')!;
+    const track = hint.querySelector<HTMLElement>('.gain-amount-track')!;
+    const value = button.querySelector<HTMLElement>('strong')!;
+    return {
+      hintFontSize: getComputedStyle(hint).fontSize,
+      hintColor: getComputedStyle(hint).color,
+      amountWhiteSpace: getComputedStyle(value).whiteSpace,
+      amountFits: track.scrollWidth <= track.clientWidth + 1,
+    };
+  });
+  expect(Number.parseFloat(hintMetrics.hintFontSize)).toBeGreaterThanOrEqual(12);
+  expect(hintMetrics.hintColor).not.toBe('rgba(245, 244, 235, 0.5)');
+  expect(hintMetrics.amountWhiteSpace).toBe('nowrap');
+  expect(hintMetrics.amountFits).toBe(true);
+  await gainToggle.click();
+  await expect(gainToggle.locator('strong')).toHaveText('+$18,000');
+  const amountMetrics = await gainToggle.locator('.gain-amount-track').evaluate((element) => ({
+    whiteSpace: getComputedStyle(element).whiteSpace,
+    fits: element.scrollWidth <= element.clientWidth + 1,
+  }));
+  expect(amountMetrics.whiteSpace).toBe('nowrap');
+  expect(amountMetrics.fits).toBe(true);
+  await gainToggle.click();
+  await expect(gainToggle.locator('strong')).toHaveText('+15.13%');
 
   const desktopMetrics = await page.evaluate(() => {
     const cards = [...document.querySelectorAll<HTMLElement>('.stock-grid .stock-card')];
@@ -203,20 +249,30 @@ test('shows compact cards for quotes, gains, empty symbols, long names, alerts, 
   expect(longPriceMetrics.gainHeight).toBeLessThanOrEqual(longPriceMetrics.gainLineHeight + 1);
   const hugeGainMetrics = await hugeGain.evaluate((card) => {
     const value = card.querySelector<HTMLElement>('.gain-panel strong')!;
+    const track = card.querySelector<HTMLElement>('.gain-amount-track')!;
     const panel = card.querySelector<HTMLElement>('.gain-panel')!;
+    const row = card.querySelector<HTMLElement>('.stock-values-row')!;
     return {
-      valueFits: value.scrollWidth <= value.clientWidth + 1,
       panelFits: panel.scrollWidth <= panel.clientWidth + 1,
+      needsHorizontalScroll: track.scrollWidth > track.clientWidth + 1,
+      trackOverflowX: getComputedStyle(track).overflowX,
+      fontSize: Number.parseFloat(getComputedStyle(value).fontSize),
       wrapped: value.clientHeight > Number.parseFloat(getComputedStyle(value).lineHeight) + 1,
       overflowWrap: getComputedStyle(value).overflowWrap,
       whiteSpace: getComputedStyle(value).whiteSpace,
+      rowIsWide: row.classList.contains('has-long-gain'),
+      pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   });
-  expect(hugeGainMetrics.valueFits).toBe(true);
   expect(hugeGainMetrics.panelFits).toBe(true);
-  expect(hugeGainMetrics.wrapped).toBe(true);
-  expect(hugeGainMetrics.overflowWrap).toBe('anywhere');
-  expect(hugeGainMetrics.whiteSpace).toBe('normal');
+  expect(hugeGainMetrics.needsHorizontalScroll).toBe(true);
+  expect(hugeGainMetrics.trackOverflowX).toBe('auto');
+  expect(hugeGainMetrics.fontSize).toBeGreaterThanOrEqual(12);
+  expect(hugeGainMetrics.wrapped).toBe(false);
+  expect(hugeGainMetrics.overflowWrap).toBe('normal');
+  expect(hugeGainMetrics.whiteSpace).toBe('nowrap');
+  expect(hugeGainMetrics.rowIsWide).toBe(true);
+  expect(hugeGainMetrics.pageOverflow).toBe(false);
   expect(desktopMetrics.horizontalOverflow).toBe(false);
 
   await group.scrollIntoViewIfNeeded();
@@ -242,6 +298,42 @@ test('shows compact cards for quotes, gains, empty symbols, long names, alerts, 
     if (width === 768) expect(metrics.columns).toBe(2);
     if (width === 1440) expect(metrics.columns).toBe(4);
   }
+
+  const iconPage = await page.context().newPage();
+  const iconFixture: AppState = {
+    ...fixture,
+    stocks: fixture.stocks.filter((stock) => stock.id === 'compact-tw-live' || stock.id === 'compact-tw-money'),
+  };
+  await iconPage.setViewportSize({ width: 1440, height: 960 });
+  await iconPage.addInitScript((state) => localStorage.setItem('stockDesktopState.v1', JSON.stringify(state)), iconFixture);
+  await iconPage.goto('/');
+  const iconGroup = iconPage.getByRole('region', { name: '測試資料分區' });
+  const actionMenu = iconGroup.getByRole('button', { name: '台積電測試資料的操作選單' });
+  await actionMenu.click();
+  await expect(actionMenu).toHaveAttribute('aria-expanded', 'true');
+  await expect(actionMenu.locator('svg')).toHaveAttribute('aria-hidden', 'true');
+  await expect(iconGroup.getByRole('group', { name: '台積電測試資料操作' })).toBeVisible();
+  await mkdir(artifacts, { recursive: true });
+  await iconPage.evaluate(() => {
+    const badge = document.createElement('div');
+    badge.textContent = '測試資料（非即時行情）';
+    badge.style.cssText = 'position:fixed;z-index:1000;left:18px;bottom:18px;padding:8px 12px;border:1px solid rgba(255,255,255,.4);border-radius:8px;background:#182b24;color:white;font:12px sans-serif;';
+    document.body.append(badge);
+  });
+  await iconPage.screenshot({ path: resolve(artifacts, 'refined-icons.png'), fullPage: true });
+  await actionMenu.click();
+  await iconPage.setViewportSize({ width: 375, height: 812 });
+  const mobileGainToggle = iconGroup.getByRole('article', { name: /金山電.*8042/ }).getByRole('button', { name: /損益顯示切換/ });
+  await mobileGainToggle.click();
+  await expect(mobileGainToggle.locator('strong')).toHaveText('+$18,000');
+  const mobileAmount = await mobileGainToggle.locator('.gain-amount-track').evaluate((element) => ({
+    fits: element.scrollWidth <= element.clientWidth + 1,
+    horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
+  }));
+  expect(mobileAmount.fits).toBe(true);
+  expect(mobileAmount.horizontalOverflow).toBe(false);
+  await iconPage.screenshot({ path: resolve(artifacts, 'refined-icons-375.png'), fullPage: true });
+  await iconPage.close();
 
   const singleTab = await page.context().newPage();
   await singleTab.setViewportSize({ width: 1440, height: 900 });
@@ -382,10 +474,10 @@ test('gain toggles persist, settings save locally, backgrounds upload and surviv
   await page.locator('[data-test-fixture-label]').evaluate((element) => element.remove());
 
   await card.getByRole('button', { name: /損益顯示切換/ }).click();
-  await expect(card.getByText('+NT$50.00', { exact: true })).toBeVisible();
+  await expect(card.getByText('+$50', { exact: true })).toBeVisible();
   await page.reload();
   const reloadedCard = page.getByRole('article', { name: /測試資料 2330.*2330/ });
-  await expect(reloadedCard.getByText('+NT$50.00', { exact: true })).toBeVisible();
+  await expect(reloadedCard.getByText('+$50', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: '設定' }).click();
   const settings = page.getByRole('dialog', { name: '設定' });
@@ -444,7 +536,7 @@ test('gain toggles persist, settings save locally, backgrounds upload and surviv
   await identityDialog.getByRole('button', { name: '儲存變更' }).click();
   const changedCard = page.getByRole('article', { name: /AAPL.*AAPL/ });
   await expect(changedCard.getByText('—', { exact: true })).toBeVisible();
-  await expect(changedCard.getByText('NT$110.00', { exact: true })).toHaveCount(0);
+  await expect(changedCard.getByText('110', { exact: true })).toHaveCount(0);
 
   for (const width of [375, 768, 1440]) {
     await page.setViewportSize({ width, height: 850 });

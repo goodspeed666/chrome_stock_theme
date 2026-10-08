@@ -37,17 +37,17 @@ test('loads the built extension in an isolated Chromium profile', async () => {
     await worker.evaluate(() => {
       const workerGlobal = globalThis as typeof globalThis & { __providerFetchCount: number };
       workerGlobal.__providerFetchCount = 0;
-      const globals = workerGlobal as typeof workerGlobal & { __providerFetchMode: string; __providerFetchUrls: string[]; __sameTimestampMicros: number };
+      const globals = workerGlobal as typeof workerGlobal & { __providerFetchMode: string; __providerFetchUrls: string[]; __sameTimestampMicros: number; __sameTimestampLimitUp?: boolean };
       globals.__providerFetchMode = 'count';
       globals.__providerFetchUrls = [];
       const realFetch = globalThis.fetch.bind(globalThis);
       globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-        const requestGlobals = globalThis as typeof workerGlobal & { __providerFetchMode: string; __providerFetchUrls: string[]; __sameTimestampMicros: number };
+          const requestGlobals = globalThis as typeof workerGlobal & { __providerFetchMode: string; __providerFetchUrls: string[]; __sameTimestampMicros: number; __sameTimestampLimitUp?: boolean };
         const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
         requestGlobals.__providerFetchCount += 1;
         requestGlobals.__providerFetchUrls.push(url);
         if (requestGlobals.__providerFetchMode === 'fugle-equal') {
-          return Promise.resolve(new Response(JSON.stringify({ lastTrade: { price: 101, time: requestGlobals.__sameTimestampMicros }, previousClose: 99 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+          return Promise.resolve(new Response(JSON.stringify({ lastTrade: { price: 101, time: requestGlobals.__sameTimestampMicros }, previousClose: 99, isLimitUpPrice: requestGlobals.__sameTimestampLimitUp === true, isLimitDownPrice: false, isTrial: false, tradingHalt: { isHalted: false }, isLimitUpHalt: false, isLimitDownHalt: false }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
         }
         if ((requestGlobals.__providerFetchMode === 'symbol-name' || requestGlobals.__providerFetchMode === 'budget-race') && url.includes('api.fugle.tw') && url.includes('/ticker/')) {
           const symbol = url.split('/').pop() ?? '';
@@ -281,6 +281,46 @@ test('loads the built extension in an isolated Chromium profile', async () => {
     expect(sameTimestampState['stockDesktopState.v1'].stocks[0]).toMatchObject({
       quoteStatus: 'stale', quote: { price: 100, timestamp }, alertLatches: { above: true, below: false },
     });
+
+    const limitUpdateTimestamp = Date.now() - 30_000;
+    const limitUpdateState = {
+      ...structuredClone(DEFAULT_STATE),
+      settings: { ...DEFAULT_STATE.settings, fugleKey: 'fake-fugle-key', notificationsEnabled: false, notificationPermission: 'unsupported' as const, limitNotificationsEnabled: false },
+      stocks: [{
+        id: 'limit-up-equal-2330', market: 'TW' as const, symbol: '2330', name: '台積電狀態更新', order: 0, groupId: 'group-tw',
+        gainDisplay: 'percent' as const, alert: {}, alertLatches: { above: false, below: false }, quoteStatus: 'live' as const,
+        quote: { price: 101, previousClose: 99, dayChange: 2, dayChangePercent: 2.02, timestamp: limitUpdateTimestamp, status: 'live' as const, source: 'Fugle' as const, isLimitUpPrice: true, isLimitDownPrice: false, isTrial: false, isTradingHalted: false, isLimitUpHalt: false, isLimitDownHalt: false },
+      }],
+    };
+    await page.evaluate((state) => chrome.runtime.sendMessage({ type: 'STATE_MUTATE', operation: { type: 'replace', state } }), limitUpdateState);
+    const limitUpdateCard = page.getByRole('article', { name: /台積電狀態更新.*2330/ });
+    await expect(limitUpdateCard).toHaveClass(/is-limit-up/);
+    await expect(limitUpdateCard.getByText('漲停', { exact: true })).toBeVisible();
+    await page.evaluate(async () => chrome.storage.local.set({ 'stockDesktopScheduler.v1': {
+      version: 1,
+      providers: {
+        TW: { recentRequests: [], cooldownUntil: 0, cursor: 0 },
+        US: { recentRequests: [], cooldownUntil: 0, cursor: 0 },
+      },
+    } }));
+    await worker.evaluate((quoteTimestamp) => {
+      const globals = globalThis as typeof globalThis & { __providerFetchCount: number; __providerFetchMode: string; __sameTimestampMicros: number; __sameTimestampLimitUp: boolean };
+      globals.__providerFetchCount = 0;
+      globals.__providerFetchMode = 'fugle-equal';
+      globals.__sameTimestampMicros = quoteTimestamp * 1000;
+      globals.__sameTimestampLimitUp = false;
+    }, limitUpdateTimestamp);
+    const limitFlagRefresh = await page.evaluate(() => chrome.runtime.sendMessage({ type: 'REFRESH_QUOTES' }));
+    expect(limitFlagRefresh.refreshed).toBe(1);
+    await expect(limitUpdateCard).not.toHaveClass(/is-limit-up/);
+    await expect(limitUpdateCard.getByText('漲停', { exact: true })).toHaveCount(0);
+    const limitFlagState = await page.evaluate(async () => (await chrome.storage.local.get('stockDesktopState.v1'))['stockDesktopState.v1']);
+    expect(limitFlagState.stocks[0]).toMatchObject({
+      quoteStatus: 'live',
+      quote: { price: 101, timestamp: limitUpdateTimestamp, isLimitUpPrice: false, isLimitDownPrice: false },
+      alertLatches: { above: false, below: false },
+    });
+    expect(await page.evaluate(() => chrome.notifications.getAll())).toEqual({});
 
     const rateLimitState = {
       ...structuredClone(DEFAULT_STATE),

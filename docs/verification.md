@@ -25,7 +25,7 @@
 
 `artifacts/chrome-stock-desktop.zip` 的根目錄包含 `manifest.json`，解壓後可在 Chrome「載入未封裝項目」選擇該目錄。也可直接載入專案 `dist/`。
 
-SHA-256：`377a279e9bb241e3675a602d49cf91ffc8d5159af1df1e8c0dace43d085ef3a4`
+SHA-256：`9ca928916065f1510524f498d8b4d762a7d6125f384d09d3ce752c1825d82c13`
 
 日期更新驗證：公曆 24px、農曆 16px，星期使用全形括號；台北凌晨顯示夜深問候。涵蓋農曆初一／初十／二十／三十、閏月與跨日；375px 無橫向溢出。
 
@@ -46,3 +46,10 @@ SHA-256：`377a279e9bb241e3675a602d49cf91ffc8d5159af1df1e8c0dace43d085ef3a4`
 股票名稱輸入框：查詢成功名稱移入代號框右側，代號value獨立；名稱14px、省略長名並保留title。lookup unit 5/5、build、built-extension focused E2E 1/1 通過，含375px無重疊/溢位。沿用原有lookup來源，未增加股票名錄；截圖使用測試行情回應。
 
 漲跌停提醒與更新間隔：台股採 Fugle 最後成交價漲跌停旗標，每台北交易日/代號/方向成功通知一次，試撮、暫停及過期成交排除；toggle 預設true，仍受通知總開關/權限限制，threshold與limit獨立pending與重試。間隔30/60/120/300秒、預設30，修改立即套用alarm且啟動恢復。62 unit、typecheck、build、完整E2E11/11通過；review無阻擋。通知驗證使用mock chrome.notifications.create（包含成功/失敗/重試），不代表真實個人API或OS通知驗證。
+
+圖示與持有損益：統一outline SVG，台幣損益整數、美金保留2位，金額nowrap/長額獨立軌道；來源列改clock+time，免費申請標記加入兩來源連結旁。typecheck/build與相關E2E3/3通過，桌面及375px截圖檢查，5173保持關閉。
+
+- 2026-10-08: Added persistent official Fugle limit-up card fireworks/badge, reduced-motion fallback, and same-timestamp flag withdrawal. Shared price display truncates values >=100, keeps two decimals below100, and removes current-price currency; TW holding gain uses +$. Typecheck, production build, 64 unit tests and 12 E2E tests (single worker) passed. Screenshots: artifacts/limit-up-desktop.png and artifacts/limit-up-mobile.png (fixtures, not live market proof). Fixed mock notification quote timestamps to avoid future-timestamp flakiness.
+
+- 2026-10-08: Added opt-in Chrome account sync (default off), validated 7 KB allowlisted snapshots, conflict choice and persistent retry. Credentials, notification permission/global switch, quotes and custom images stay local. Settings desktop/mobile fixtures: artifacts/account-sync-conflict-desktop.png and artifacts/account-sync-conflict-mobile.png. Unit suite: 69 passed; typecheck/build passed. Extension integration verifies import/export, no echo, failed write retry, pending edit conflicts and updated cloud choice. This does not prove authenticated cross-computer Google delivery; unpacked builds require matching extension IDs.
+- Final sync guard verification: `npm run build` and `npm run test:e2e -- --workers=1 --output=test-results/account-sync-final-guard` passed (14/14); ZIP integrity passed. Port 5173 remains closed.

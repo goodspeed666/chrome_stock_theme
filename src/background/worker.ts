@@ -1,7 +1,19 @@
-import { DEFAULT_STATE, type AppState, type Market, type Quote, type Stock } from '../domain/types';
+import { DEFAULT_STATE, type AppState, type BackgroundSettings, type Market, type Quote, type Stock } from '../domain/types';
 import { evaluateAlerts } from '../domain/alerts';
 import { isNewerQuote } from '../domain/quoteFreshness';
 import { STATE_KEY, applyOperation, normalizeState, type StateOperation } from '../data/storage';
+import {
+  ACCOUNT_SYNC_KEY,
+  ACCOUNT_SYNC_META_KEY,
+  accountSyncDataKey,
+  compareAccountSyncVersions,
+  createAccountSyncSnapshot,
+  hasAccountSyncData,
+  mergeAccountSyncSnapshot,
+  parseAccountSyncSnapshot,
+  serializeAccountSyncSnapshot,
+  type AccountSyncSnapshot,
+} from '../data/accountSync';
 import { fetchFinnhubQuote, fetchFinnhubSymbolName } from '../providers/finnhub';
 import { fetchFugleQuote, fetchFugleSymbolName } from '../providers/fugle';
 import { ProviderError } from '../providers/quotes';
@@ -13,6 +25,22 @@ const NAME_CACHE_TTL_MS = 24 * 60 * 60_000;
 const NAME_CACHE_MAX_ENTRIES = 300;
 const LIMIT_NOTIFICATION_KEY = 'stockDesktopLimitNotifications.v1';
 const LIMIT_NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60_000;
+type AccountSyncError = 'capacity' | 'write' | 'invalid';
+interface AccountSyncMetadata {
+  version: 1;
+  /** Stable actor identity for this installation. */
+  deviceId: string;
+  /** Device identity that produced the snapshot currently represented locally. */
+  versionDeviceId: string;
+  revision: number;
+  updatedAt: number;
+  pending: boolean;
+  initialized: boolean;
+  error?: AccountSyncError;
+  conflict?: AccountSyncSnapshot;
+  lastBuiltInBackground?: BackgroundSettings;
+  lastWrittenAt?: number;
+}
 type Candidate = ScheduledCandidate;
 type SymbolNameCache = Record<string, { name: string; cachedAt: number }>;
 type ThresholdNotification = NonNullable<Stock['pendingNotification']>;
@@ -42,6 +70,195 @@ async function readScheduler(): Promise<SchedulerState> {
 
 function saveScheduler(scheduler: SchedulerState) {
   return chrome.storage.local.set({ [SCHEDULER_KEY]: scheduler });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isBuiltInBackground(value: unknown): value is BackgroundSettings {
+  return isRecord(value) && typeof value.selectedId === 'string' && /^scene-(?:0[1-9]|10)$/.test(value.selectedId)
+    && typeof value.brightness === 'number' && Number.isFinite(value.brightness) && value.brightness >= 0 && value.brightness <= 1;
+}
+
+function newAccountSyncMetadata(): AccountSyncMetadata {
+  const deviceId = crypto.randomUUID();
+  return { version: 1, deviceId, versionDeviceId: deviceId, revision: 0, updatedAt: 0, pending: false, initialized: false };
+}
+
+function normalizeAccountSyncMetadata(value: unknown): AccountSyncMetadata {
+  if (!isRecord(value) || value.version !== 1 || typeof value.deviceId !== 'string' || !value.deviceId.trim() || value.deviceId.length > 128
+    || !Number.isSafeInteger(value.revision) || Number(value.revision) < 0
+    || typeof value.updatedAt !== 'number' || !Number.isFinite(value.updatedAt) || value.updatedAt < 0) return newAccountSyncMetadata();
+  const conflict = value.conflict === undefined ? undefined : parseAccountSyncSnapshot(value.conflict) ?? undefined;
+  const error: AccountSyncError | undefined = value.error === 'capacity' || value.error === 'write' || value.error === 'invalid' ? value.error : undefined;
+  return {
+    version: 1,
+    deviceId: value.deviceId,
+    versionDeviceId: typeof value.versionDeviceId === 'string' && value.versionDeviceId.trim() && value.versionDeviceId.length <= 128 ? value.versionDeviceId : value.deviceId,
+    revision: Number(value.revision),
+    updatedAt: value.updatedAt,
+    pending: value.pending === true,
+    initialized: value.initialized === true,
+    ...(error ? { error } : {}),
+    ...(conflict ? { conflict } : {}),
+    ...(isBuiltInBackground(value.lastBuiltInBackground) ? { lastBuiltInBackground: value.lastBuiltInBackground } : {}),
+    ...(typeof value.lastWrittenAt === 'number' && Number.isFinite(value.lastWrittenAt) ? { lastWrittenAt: value.lastWrittenAt } : {}),
+  };
+}
+
+async function readAccountSyncMetadata(): Promise<AccountSyncMetadata> {
+  const saved = await chrome.storage.local.get(ACCOUNT_SYNC_META_KEY);
+  return saved[ACCOUNT_SYNC_META_KEY] ? normalizeAccountSyncMetadata(saved[ACCOUNT_SYNC_META_KEY]) : newAccountSyncMetadata();
+}
+
+function accountSyncStatus(state: AppState, metadata: AccountSyncMetadata) {
+  const enabled = state.settings.accountSyncEnabled;
+  if (!enabled) return { enabled, phase: 'disabled', message: '已關閉同步；這部裝置與 Chrome 同步空間的資料都會保留。' };
+  if (metadata.conflict) return { enabled, phase: 'conflict', message: '這部裝置和 Chrome 同步空間都有不同資料，請選擇要使用哪一份。' };
+  if (metadata.error === 'capacity') return { enabled, phase: 'error', message: '同步內容超過安全容量；本機資料已保留，請刪除部分股票或縮短名稱後重試。' };
+  if (metadata.error === 'invalid') return { enabled, phase: 'error', message: 'Chrome 同步空間內的資料格式無法讀取；本機資料已保留。' };
+  if (metadata.error === 'write') return { enabled, phase: 'error', message: '無法寫入 Chrome 同步空間；本機資料已保留，稍後可重試。' };
+  if (metadata.pending) return { enabled, phase: 'pending', message: '正在等待寫入 Chrome 同步空間。' };
+  if (metadata.lastWrittenAt) return { enabled, phase: 'written', message: '已寫入 Chrome 同步空間；其他裝置何時收到由 Chrome 帳戶同步服務處理。' };
+  return { enabled, phase: 'ready', message: '同步已開啟；下次變更投資組合時會寫入 Chrome 同步空間。' };
+}
+
+function accountSyncSnapshotFor(state: AppState, metadata: AccountSyncMetadata) {
+  return createAccountSyncSnapshot(state, metadata, metadata.lastBuiltInBackground);
+}
+
+async function writeAccountSyncSnapshot(state: AppState, metadata: AccountSyncMetadata) {
+  metadata.versionDeviceId = metadata.deviceId;
+  metadata.pending = true;
+  metadata.error = undefined;
+  await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+  try {
+    const snapshot = accountSyncSnapshotFor(state, metadata);
+    const serialized = serializeAccountSyncSnapshot(snapshot);
+    await chrome.storage.sync.set({ [ACCOUNT_SYNC_KEY]: JSON.parse(serialized) as AccountSyncSnapshot });
+    metadata.pending = false;
+    metadata.initialized = true;
+    metadata.error = undefined;
+    metadata.conflict = undefined;
+    metadata.lastWrittenAt = Date.now();
+    metadata.lastBuiltInBackground = snapshot.background;
+  } catch (error) {
+    metadata.pending = true;
+    metadata.error = error instanceof Error && error.message.includes('容量限制') ? 'capacity' : 'write';
+  }
+  await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+}
+
+async function applyRemoteAccountSnapshot(state: AppState, metadata: AccountSyncMetadata, snapshot: AccountSyncSnapshot) {
+  const merged = mergeAccountSyncSnapshot(state, snapshot);
+  metadata.versionDeviceId = snapshot.deviceId;
+  metadata.revision = snapshot.revision;
+  metadata.updatedAt = snapshot.updatedAt;
+  metadata.pending = false;
+  metadata.initialized = true;
+  metadata.error = undefined;
+  metadata.conflict = undefined;
+  metadata.lastBuiltInBackground = snapshot.background;
+  await chrome.storage.local.set({ [STATE_KEY]: merged, [ACCOUNT_SYNC_META_KEY]: metadata });
+  return merged;
+}
+
+async function reconcileAccountSync(stateInput: AppState): Promise<AppState> {
+  let state = stateInput;
+  const metadata = await readAccountSyncMetadata();
+  if (isBuiltInBackground(state.background) && !metadata.lastBuiltInBackground) metadata.lastBuiltInBackground = state.background;
+  if (!state.settings.accountSyncEnabled) {
+    await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+    return state;
+  }
+  let rawSnapshot: unknown;
+  try {
+    const saved = await chrome.storage.sync.get(ACCOUNT_SYNC_KEY);
+    rawSnapshot = saved[ACCOUNT_SYNC_KEY];
+  } catch {
+    metadata.pending = true;
+    metadata.error = 'write';
+    await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+    return state;
+  }
+
+  if (rawSnapshot !== undefined) {
+    const remote = parseAccountSyncSnapshot(rawSnapshot);
+    if (!remote) {
+      metadata.error = 'invalid';
+      metadata.conflict = undefined;
+      await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+      return state;
+    }
+    if (metadata.conflict) {
+      metadata.conflict = remote;
+      metadata.error = undefined;
+      await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+      return state;
+    }
+    const remoteState = mergeAccountSyncSnapshot(structuredClone(DEFAULT_STATE), remote);
+    const localKey = accountSyncDataKey(state, metadata.lastBuiltInBackground);
+    const remoteKey = accountSyncDataKey(remoteState);
+    if (!metadata.initialized) {
+      if (!hasAccountSyncData(state, metadata.lastBuiltInBackground)) {
+        if (hasAccountSyncData(remoteState)) state = await applyRemoteAccountSnapshot(state, metadata, remote);
+        else {
+          metadata.initialized = true;
+          metadata.revision = remote.revision;
+          metadata.versionDeviceId = remote.deviceId;
+          metadata.updatedAt = remote.updatedAt;
+          metadata.lastBuiltInBackground = remote.background;
+          await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+        }
+        return state;
+      }
+      if (localKey !== remoteKey) {
+        metadata.conflict = remote;
+        metadata.pending = false;
+        metadata.error = undefined;
+        await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+        return state;
+      }
+      metadata.initialized = true;
+      metadata.revision = remote.revision;
+      metadata.versionDeviceId = remote.deviceId;
+      metadata.updatedAt = remote.updatedAt;
+      metadata.lastBuiltInBackground = remote.background;
+      await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+      return state;
+    }
+
+    const localVersion = { revision: metadata.revision, deviceId: metadata.versionDeviceId, updatedAt: metadata.updatedAt };
+    const remoteOrder = compareAccountSyncVersions(remote, localVersion);
+    const remoteWins = remoteOrder > 0 || (remoteOrder === 0 && remoteKey > localKey);
+    if (metadata.pending && localKey !== remoteKey && remoteOrder >= 0) {
+      metadata.conflict = remote;
+      metadata.error = undefined;
+      await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+      return state;
+    }
+    if (remoteWins) return await applyRemoteAccountSnapshot(state, metadata, remote);
+    metadata.lastBuiltInBackground = metadata.lastBuiltInBackground ?? remote.background;
+    if (localKey !== remoteKey || metadata.pending || remoteOrder < 0) {
+      if (localKey !== remoteKey || remoteOrder < 0) {
+        metadata.revision = Math.max(metadata.revision, remote.revision) + 1;
+        metadata.updatedAt = Date.now();
+        metadata.versionDeviceId = metadata.deviceId;
+      }
+      await writeAccountSyncSnapshot(state, metadata);
+    } else {
+      metadata.pending = false;
+      metadata.error = undefined;
+      await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+    }
+    return state;
+  }
+
+  if (!metadata.initialized) metadata.initialized = true;
+  if (hasAccountSyncData(state, metadata.lastBuiltInBackground) || metadata.pending) await writeAccountSyncSnapshot(state, metadata);
+  else await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+  return state;
 }
 
 function providerKey(state: AppState, market: Market) {
@@ -74,7 +291,8 @@ function orderedCandidates(state: AppState, requestedStockId?: string): Candidat
 async function ensureSetup() {
   await enqueue(async () => {
     const saved = await chrome.storage.local.get(STATE_KEY);
-    const state = normalizeState(saved[STATE_KEY] ?? structuredClone(DEFAULT_STATE));
+    let state = normalizeState(saved[STATE_KEY] ?? structuredClone(DEFAULT_STATE));
+    state = await reconcileAccountSync(state);
     await chrome.storage.local.set({ [STATE_KEY]: state });
     await saveScheduler(await readScheduler());
     await reconcileAlarm(state);
@@ -90,20 +308,113 @@ async function reconcileAlarm(state: AppState) {
 chrome.runtime.onInstalled.addListener(() => { void ensureSetup(); });
 chrome.runtime.onStartup.addListener(() => { void ensureSetup(); });
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === ALARM_NAME) void refreshQuotes(); });
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'sync' || !Object.hasOwn(changes, ACCOUNT_SYNC_KEY)) return;
+  void enqueue(async () => {
+    const state = await loadState();
+    if (!state.settings.accountSyncEnabled) return;
+    const reconciled = await reconcileAccountSync(state);
+    await chrome.storage.local.set({ [STATE_KEY]: reconciled });
+    await reconcileAlarm(reconciled);
+  });
+});
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'STATE_MUTATE') {
     void enqueue(async () => {
       const operation = message.operation as StateOperation;
-      const next = normalizeState(applyOperation(await loadState(), operation));
+      let previous = await loadState();
+      let metadata = await readAccountSyncMetadata();
+      if (previous.settings.accountSyncEnabled && !metadata.initialized && !metadata.conflict) {
+        previous = await reconcileAccountSync(previous);
+        metadata = await readAccountSyncMetadata();
+      }
+      const next = normalizeState(applyOperation(previous, operation));
       const notificationsDisabled = operation.type === 'update-notification-settings'
         && (!operation.notificationsEnabled || operation.notificationPermission !== 'granted');
       if (notificationsDisabled || (operation.type === 'update-settings' && operation.settings.limitNotificationsEnabled === false)) {
         next.stocks = next.stocks.map((stock) => ({ ...stock, pendingLimitNotification: undefined, limitNotificationFailure: undefined }));
       }
-      await chrome.storage.local.set({ [STATE_KEY]: next });
+      if (isBuiltInBackground(previous.background) && !metadata.lastBuiltInBackground) metadata.lastBuiltInBackground = previous.background;
+      const syncChanged = accountSyncDataKey(previous, metadata.lastBuiltInBackground) !== accountSyncDataKey(next, metadata.lastBuiltInBackground);
+      if (syncChanged) {
+        metadata.revision = Math.max(metadata.revision, metadata.conflict?.revision ?? 0) + 1;
+        metadata.updatedAt = Date.now();
+        metadata.versionDeviceId = metadata.deviceId;
+        metadata.pending = true;
+        if (metadata.error !== 'invalid') metadata.error = undefined;
+      }
+      await chrome.storage.local.set({ [STATE_KEY]: next, [ACCOUNT_SYNC_META_KEY]: metadata });
       if (operation.type === 'update-settings' && Object.hasOwn(operation.settings, 'quoteRefreshSeconds')) await reconcileAlarm(next);
+      if (next.settings.accountSyncEnabled && syncChanged && !metadata.conflict && metadata.error !== 'invalid') await writeAccountSyncSnapshot(next, metadata);
       return next;
     }).then((state) => sendResponse({ state })).catch((error: unknown) => sendResponse({ error: messageFor(error) }));
+    return true;
+  }
+  if (message?.type === 'ACCOUNT_SYNC_STATUS') {
+    void enqueue(async () => {
+      const state = await loadState();
+      const metadata = await readAccountSyncMetadata();
+      return { state, status: accountSyncStatus(state, metadata) };
+    }).then(sendResponse).catch((error: unknown) => sendResponse({ error: messageFor(error) }));
+    return true;
+  }
+  if (message?.type === 'ACCOUNT_SYNC_SET_ENABLED') {
+    void enqueue(async () => {
+      const previous = await loadState();
+      const enabled = message.enabled === true;
+      const state = { ...previous, settings: { ...previous.settings, accountSyncEnabled: enabled } };
+      const metadata = await readAccountSyncMetadata();
+      if (isBuiltInBackground(previous.background) && !metadata.lastBuiltInBackground) metadata.lastBuiltInBackground = previous.background;
+      await chrome.storage.local.set({ [STATE_KEY]: state, [ACCOUNT_SYNC_META_KEY]: metadata });
+      const reconciled = enabled ? await reconcileAccountSync(state) : state;
+      await chrome.storage.local.set({ [STATE_KEY]: reconciled });
+      await reconcileAlarm(reconciled);
+      return { state: reconciled, status: accountSyncStatus(reconciled, await readAccountSyncMetadata()) };
+    }).then(sendResponse).catch((error: unknown) => sendResponse({ error: messageFor(error) }));
+    return true;
+  }
+  if (message?.type === 'ACCOUNT_SYNC_RESOLVE') {
+    void enqueue(async () => {
+      const state = await loadState();
+      const metadata = await readAccountSyncMetadata();
+      if (!state.settings.accountSyncEnabled || !metadata.conflict) throw new Error('目前沒有待選擇的同步資料');
+      if (message.choice === 'sync') {
+        const saved = await chrome.storage.sync.get(ACCOUNT_SYNC_KEY);
+        const remote = parseAccountSyncSnapshot(saved[ACCOUNT_SYNC_KEY]);
+        if (!remote) {
+          metadata.conflict = undefined;
+          metadata.error = 'invalid';
+          await chrome.storage.local.set({ [ACCOUNT_SYNC_META_KEY]: metadata });
+          throw new Error('Chrome 同步空間的資料已變更或無法讀取，請重新確認同步狀態。');
+        }
+        const applied = await applyRemoteAccountSnapshot(state, metadata, remote);
+        await reconcileAlarm(applied);
+        return { state: applied, status: accountSyncStatus(applied, await readAccountSyncMetadata()) };
+      }
+      if (message.choice !== 'local') throw new Error('同步選項無效');
+      const cachedConflictRevision = metadata.conflict.revision;
+      const currentRemote = await chrome.storage.sync.get(ACCOUNT_SYNC_KEY);
+      const parsedCurrentRemote = parseAccountSyncSnapshot(currentRemote[ACCOUNT_SYNC_KEY]);
+      metadata.revision = Math.max(metadata.revision, cachedConflictRevision, parsedCurrentRemote?.revision ?? 0) + 1;
+      metadata.updatedAt = Date.now();
+      metadata.versionDeviceId = metadata.deviceId;
+      metadata.conflict = undefined;
+      metadata.initialized = true;
+      await writeAccountSyncSnapshot(state, metadata);
+      return { state, status: accountSyncStatus(state, await readAccountSyncMetadata()) };
+    }).then(sendResponse).catch((error: unknown) => sendResponse({ error: messageFor(error) }));
+    return true;
+  }
+  if (message?.type === 'ACCOUNT_SYNC_RETRY') {
+    void enqueue(async () => {
+      const state = await loadState();
+      const metadata = await readAccountSyncMetadata();
+      if (!state.settings.accountSyncEnabled) return { state, status: accountSyncStatus(state, metadata) };
+      const reconciled = await reconcileAccountSync(state);
+      await chrome.storage.local.set({ [STATE_KEY]: reconciled });
+      await reconcileAlarm(reconciled);
+      return { state: reconciled, status: accountSyncStatus(reconciled, await readAccountSyncMetadata()) };
+    }).then(sendResponse).catch((error: unknown) => sendResponse({ error: messageFor(error) }));
     return true;
   }
   if (message?.type === 'REFRESH_QUOTES') {
@@ -332,9 +643,26 @@ async function applyQuote(candidate: Candidate, quote: Quote) {
     const stocks = current.stocks.map((stock) => {
       if (stock.market !== candidate.market || stock.symbol.toUpperCase() !== candidate.symbol.toUpperCase()) return stock;
       if (stock.quote && quote.timestamp === stock.quote.timestamp) {
-        if (stock.quoteStatus === quote.status && stock.quoteError === undefined) return stock;
+        const sameTimestampLimitFlags = candidate.market === 'TW' && quote.source === 'Fugle'
+          ? {
+            isLimitUpPrice: quote.isLimitUpPrice,
+            isLimitDownPrice: quote.isLimitDownPrice,
+            isTrial: quote.isTrial,
+            isTradingHalted: quote.isTradingHalted,
+            isLimitUpHalt: quote.isLimitUpHalt,
+            isLimitDownHalt: quote.isLimitDownHalt,
+          }
+          : null;
+        const limitFlagsChanged = sameTimestampLimitFlags !== null && Object.entries(sameTimestampLimitFlags)
+          .some(([key, value]) => stock.quote?.[key as keyof Quote] !== value);
+        if (stock.quoteStatus === quote.status && stock.quoteError === undefined && !limitFlagsChanged) return stock;
         touched = true;
-        return { ...stock, quoteStatus: quote.status, quoteError: undefined };
+        return {
+          ...stock,
+          quote: limitFlagsChanged && sameTimestampLimitFlags ? { ...stock.quote, ...sameTimestampLimitFlags } : stock.quote,
+          quoteStatus: quote.status,
+          quoteError: undefined,
+        };
       }
       if (!isNewerQuote(stock.quote, quote)) return stock;
       touched = true;

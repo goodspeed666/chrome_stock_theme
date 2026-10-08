@@ -17,6 +17,7 @@ function normalizeState(value: unknown): AppState {
       ...state.settings,
       limitNotificationsEnabled: typeof state.settings?.limitNotificationsEnabled === 'boolean' ? state.settings.limitNotificationsEnabled : true,
       quoteRefreshSeconds,
+      accountSyncEnabled: state.settings?.accountSyncEnabled === true,
     },
     background: { ...DEFAULT_STATE.background, ...state.background, selectedId: state.background?.selectedId === 'default' ? 'scene-01' : (state.background?.selectedId ?? DEFAULT_STATE.background.selectedId) },
   };

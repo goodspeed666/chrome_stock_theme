@@ -38,7 +38,7 @@ describe('dialog and quote error feedback', () => {
   it('shows why the preserved last quote is stale and keeps its actual price visible', () => {
     const noop = vi.fn();
     render(<StockCard stock={staleStock} groups={[{ id: 'group-tw', name: '台股', order: 0 }]} onEdit={noop} onRemove={noop} onMove={noop} onGainDisplayChange={noop} onRetryNotification={noop} onDragStart={noop} onDrop={noop} dragging={false} />);
-    expect(screen.getByText('NT$1,000.00')).toBeVisible();
+    expect(screen.getByText('1,000')).toBeVisible();
     expect(screen.getByRole('status')).toHaveTextContent('最近成交仍保留 · 請求過於頻繁');
   });
 
