@@ -111,10 +111,40 @@ describe('provider request budget and restart persistence', () => {
     const now = 1_800_000_000_000;
     let scheduler = emptyScheduler();
     scheduler = applyCooldown(scheduler, 'US', now, 90_000);
-    scheduler = normalizeScheduler(JSON.parse(JSON.stringify(scheduler)));
+    scheduler = normalizeScheduler(JSON.parse(JSON.stringify(scheduler)), now);
     expect(scheduler.providers.US.cooldownUntil).toBe(now + 90_000);
     expect(selectBatch(candidates.map((candidate) => ({ ...candidate, market: 'US' as const })), scheduler.providers.US, now + 60_000)).toHaveLength(0);
     expect(selectBatch(candidates.map((candidate) => ({ ...candidate, market: 'US' as const })), scheduler.providers.US, now + 91_000)).toHaveLength(24);
+  });
+
+  it('drops invalid persisted cooldowns without losing the sliding-minute request history', () => {
+    const scheduler = normalizeScheduler({
+      version: 1,
+      providers: {
+        TW: { recentRequests: [100_000], cooldownUntil: Number.NaN, cursor: 3 },
+        US: { recentRequests: [100_000, 100_500], cooldownUntil: Number.POSITIVE_INFINITY, cursor: 4 },
+      },
+    });
+    expect(scheduler.providers.TW.cooldownUntil).toBe(0);
+    expect(scheduler.providers.US.cooldownUntil).toBe(0);
+    expect(scheduler.providers.TW.recentRequests).toEqual([100_000]);
+    expect(scheduler.providers.US.recentRequests).toEqual([100_000, 100_500]);
+  });
+
+  it('keeps cooldowns finite for invalid retry values and preserves the request budget history', () => {
+    const now = 1_800_000_000_000;
+    const recentRequests = Array.from({ length: 49 }, (_, index) => now - index * 100);
+    const initial = emptyScheduler();
+    initial.providers.US = { recentRequests, cooldownUntil: Number.NaN, cursor: 6 };
+    const next = applyCooldown(initial, 'US', now, Number.POSITIVE_INFINITY);
+
+    expect(next.providers.US.cooldownUntil).toBe(now + 60_000);
+    expect(Number.isFinite(next.providers.US.cooldownUntil)).toBe(true);
+    expect(next.providers.US.recentRequests).toEqual(recentRequests);
+    expect(next.providers.US.recentRequests).toHaveLength(49);
+
+    const extreme = applyCooldown(emptyScheduler(), 'TW', now, Number.MAX_VALUE);
+    expect(extreme.providers.TW.cooldownUntil).toBe(now + 7 * 24 * 60 * 60_000);
   });
 
   it('never schedules more than 50 requests inside one sliding minute', () => {

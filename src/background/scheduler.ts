@@ -3,6 +3,8 @@ import type { Market } from '../domain/types';
 export const SCHEDULER_KEY = 'stockDesktopScheduler.v1';
 export const REQUEST_LIMIT_PER_MINUTE = 50;
 export const MAX_BATCH_PER_PROVIDER = 24;
+// Seven days preserves ordinary long Retry-After values while bounding corrupt or extreme cooldowns.
+export const MAX_PROVIDER_COOLDOWN_MS = 7 * 24 * 60 * 60_000;
 
 export interface ProviderBudget {
   recentRequests: number[];
@@ -44,14 +46,27 @@ export function reserveRequest(budget: ProviderBudget, now: number): RequestRese
   return { allowed: true };
 }
 
-export function normalizeScheduler(value: unknown): SchedulerState {
+export function normalizeScheduler(value: unknown, now = Date.now()): SchedulerState {
   if (!value || typeof value !== 'object') return emptyScheduler();
   const providers = (value as Partial<SchedulerState>).providers;
+  const safeNow = Number.isFinite(now) && now >= 0 ? now : Date.now();
+  const maxCooldownUntil = safeNow + MAX_PROVIDER_COOLDOWN_MS;
+  const normalizeBudget = (stored: ProviderBudget | undefined): ProviderBudget => {
+    const cooldownUntil = typeof stored?.cooldownUntil === 'number' && Number.isFinite(stored.cooldownUntil) && stored.cooldownUntil >= 0
+      ? Math.min(stored.cooldownUntil, maxCooldownUntil)
+      : 0;
+    return {
+      ...emptyBudget(),
+      ...stored,
+      recentRequests: Array.isArray(stored?.recentRequests) ? stored.recentRequests.filter(Number.isFinite) : [],
+      cooldownUntil,
+    };
+  };
   return {
     version: 1,
     providers: {
-      TW: { ...emptyBudget(), ...providers?.TW, recentRequests: Array.isArray(providers?.TW?.recentRequests) ? providers.TW.recentRequests.filter(Number.isFinite) : [] },
-      US: { ...emptyBudget(), ...providers?.US, recentRequests: Array.isArray(providers?.US?.recentRequests) ? providers.US.recentRequests.filter(Number.isFinite) : [] },
+      TW: normalizeBudget(providers?.TW),
+      US: normalizeBudget(providers?.US),
     },
   };
 }
@@ -70,6 +85,16 @@ export function selectBatch(candidates: ScheduledCandidate[], budget: ProviderBu
 }
 
 export function applyCooldown(state: SchedulerState, market: Market, now: number, retryAfterMs?: number): SchedulerState {
-  const duration = Math.max(30_000, retryAfterMs ?? 60_000);
-  return { ...state, providers: { ...state.providers, [market]: { ...state.providers[market], cooldownUntil: Math.max(state.providers[market].cooldownUntil, now + duration) } } };
+  const safeNow = Number.isFinite(now) && now >= 0 ? now : Date.now();
+  const maxCooldownUntil = safeNow + MAX_PROVIDER_COOLDOWN_MS;
+  const current = state.providers[market];
+  const currentCooldown = Number.isFinite(current.cooldownUntil) && current.cooldownUntil >= 0
+    ? Math.min(current.cooldownUntil, maxCooldownUntil)
+    : 0;
+  const requestedDuration = retryAfterMs === undefined || !Number.isFinite(retryAfterMs) || retryAfterMs < 0
+    ? 60_000
+    : retryAfterMs;
+  const duration = Math.min(MAX_PROVIDER_COOLDOWN_MS, Math.max(30_000, requestedDuration));
+  const nextCooldown = Math.min(maxCooldownUntil, safeNow + duration);
+  return { ...state, providers: { ...state.providers, [market]: { ...current, cooldownUntil: Math.max(currentCooldown, nextCooldown) } } };
 }

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchFugleQuote, fetchFugleSymbolName, normalizeFugleQuote } from '../../src/providers/fugle';
 import { fetchFinnhubQuote, fetchFinnhubSymbolName, normalizeFinnhubQuote } from '../../src/providers/finnhub';
-import { mapHttpError, ProviderError, validatePositive } from '../../src/providers/quotes';
+import { fetchJson, mapHttpError, ProviderError, validatePositive } from '../../src/providers/quotes';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -100,11 +100,107 @@ describe('Finnhub quote normalization', () => {
     expect(limited.retryAfterMs).toBe(15_000);
   });
 
+  it('uses valid Retry-After values and falls back safely for invalid, past, or huge values', () => {
+    const now = Date.UTC(2026, 9, 8, 0, 0, 0);
+    expect(mapHttpError(new Response('', { status: 429, headers: { 'Retry-After': new Date(now + 2 * 60 * 60_000).toUTCString() } }), 'Finnhub', now).retryAfterMs).toBe(2 * 60 * 60_000);
+    for (const value of ['Wednesday, 14-Oct-26 02:00:00 GMT', 'Wed Oct 14 02:00:00 2026']) {
+      expect(mapHttpError(new Response('', { status: 429, headers: { 'Retry-After': value } }), 'Finnhub', now).retryAfterMs).toBe((6 * 24 + 2) * 60 * 60_000);
+    }
+    const mismatchedWeekday = new Date(now + 2 * 60 * 60_000).toUTCString().replace(/^\w+/, 'Mon');
+    for (const value of ['-1', 'Infinity', 'not-a-date', new Date(now - 1000).toUTCString(), mismatchedWeekday]) {
+      expect(mapHttpError(new Response('', { status: 429, headers: { 'Retry-After': value } }), 'Finnhub', now).retryAfterMs).toBe(60_000);
+    }
+    expect(mapHttpError(new Response('', { status: 429 }), 'Finnhub', now).retryAfterMs).toBe(60_000);
+    expect(mapHttpError(new Response('', { status: 429, headers: { 'Retry-After': '999999999999999999' } }), 'Finnhub', now).retryAfterMs).toBe(7 * 24 * 60 * 60_000);
+  });
+
+  it('rejects oversized responses from the declared length and cancels the body', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([123]));
+        setTimeout(() => { if (!cancelled) controller.close(); }, 50);
+      },
+      cancel() { cancelled = true; },
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200, headers: { 'Content-Length': String(1024 * 1024 + 1) } })));
+
+    await expect(fetchJson('https://example.test/quote?token=fake-key', {}, 'Provider'))
+      .rejects.toMatchObject({ status: 'provider-error', message: expect.stringContaining('過大') });
+    expect(cancelled).toBe(true);
+  });
+
+  it.each([undefined, '1'])('counts streamed bytes even when Content-Length is %s', async (contentLength) => {
+    let cancelled = false;
+    let firstPull = true;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (firstPull) {
+          firstPull = false;
+          controller.enqueue(new Uint8Array(1024 * 1024 + 1));
+        } else {
+          setTimeout(() => { if (!cancelled) controller.close(); }, 50);
+        }
+      },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    const headers = contentLength === undefined ? {} : { 'Content-Length': contentLength };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200, headers })));
+
+    await expect(fetchJson('https://example.test/quote', {}, 'Provider'))
+      .rejects.toMatchObject({ status: 'provider-error', message: expect.stringContaining('過大') });
+    expect(cancelled).toBe(true);
+  });
+
+  it('keeps the 9-second timeout active while a response body is stalled', async () => {
+    const timeout = new AbortController();
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const fail = () => controller.error(timeout.signal.reason);
+        if (timeout.signal.aborted) fail();
+        else timeout.signal.addEventListener('abort', fail, { once: true });
+      },
+    });
+    const fetchSpy = vi.fn(async () => new Response(body, { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const request = fetchJson('https://example.test/stalled', {}, 'Provider');
+    await Promise.resolve();
+    timeout.abort(new DOMException('timed out', 'TimeoutError'));
+
+    await expect(request).rejects.toMatchObject({ status: 'network-error', message: '行情請求逾時' });
+    expect(AbortSignal.timeout).toHaveBeenCalledWith(9_000);
+    expect(fetchSpy.mock.calls[0]?.[1]?.signal).toBe(timeout.signal);
+  });
+
+  it('keeps fetch failures generic when the URL and credentials are present in the thrown error', async () => {
+    const secretUrl = 'https://example.test/quote?token=fake-secret';
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error(`Failed ${secretUrl}`); }));
+
+    const error = await fetchJson(secretUrl, { Authorization: 'fake-secret' }, 'Provider').catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect((error as Error).message).not.toContain('fake-secret');
+    expect((error as Error).message).not.toContain('example.test');
+  });
+
   it('classifies Finnhub empty ticker responses as an invalid symbol', async () => {
     const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ c: 0, d: 0, dp: 0, h: 0, l: 0, o: 0, pc: 0, t: 0 }), { status: 200 }));
     vi.stubGlobal('fetch', fetchSpy);
     await expect(fetchFinnhubQuote({ market: 'US', symbol: 'NOTREAL', apiKey: 'private-token' })).rejects.toMatchObject({ status: 'invalid-symbol' });
     expect(String(fetchSpy.mock.calls[0]?.[0])).toContain('symbol=NOTREAL');
+  });
+
+  it('sends Finnhub quote credentials in the header and keeps the URL free of the key', async () => {
+    const now = 1_800_000_000_000;
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ c: 100, pc: 99, t: (now - 1000) / 1000 }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await expect(fetchFinnhubQuote({ market: 'US', symbol: 'AAPL', apiKey: 'fake-secret' }, now)).resolves.toMatchObject({ price: 100 });
+    const url = String(fetchSpy.mock.calls[0]?.[0]);
+    expect(url).toContain('symbol=AAPL');
+    expect(url).not.toContain('fake-secret');
+    expect((fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>)['X-Finnhub-Token']).toBe('fake-secret');
   });
 });
 
@@ -135,7 +231,9 @@ describe('provider symbol-name lookups', () => {
     const requestUrl = new URL(String(fetchSpy.mock.calls[0]?.[0]));
     expect(requestUrl.origin + requestUrl.pathname).toBe('https://finnhub.io/api/v1/search');
     expect(requestUrl.searchParams.get('q')).toBe('BRK.B');
-    expect(requestUrl.searchParams.get('token')).toBe('private-token');
+    expect(requestUrl.searchParams.has('token')).toBe(false);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).not.toContain('private-token');
+    expect((fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>)['X-Finnhub-Token']).toBe('private-token');
   });
 
   it('does not accept a Finnhub result whose displaySymbol matches but symbol does not', async () => {

@@ -1,6 +1,10 @@
+import { readImageDimensions } from './imageDimensions';
+
 const DB_NAME = 'stock-desktop-images';
 const STORE_NAME = 'backgrounds';
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+const MAX_IMAGE_EDGE = 8192;
+const MAX_IMAGE_PIXELS = 32_000_000;
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const BACKGROUND_UPDATE_EVENT = 'stock-desktop:background-updated';
 const BACKGROUND_UPDATE_CHANNEL = 'stock-desktop-background-updated';
@@ -35,12 +39,32 @@ function openDatabase(): Promise<IDBDatabase> {
 export async function validateImage(file: File): Promise<void> {
   if (!ALLOWED_TYPES.has(file.type)) throw new Error('請選擇 JPEG、PNG 或 WebP 圖片');
   if (file.size > MAX_UPLOAD_BYTES) throw new Error('圖片不可超過 15 MB');
+
+  const metadata = await readImageDimensions(file);
+  validateImageDimensions(metadata.width, metadata.height);
+
+  let bitmap: ImageBitmap;
   try {
-    const bitmap = await createImageBitmap(file);
-    bitmap.close();
+    bitmap = await createImageBitmap(file, { imageOrientation: 'none' });
   } catch {
     throw new Error('無法解碼這張圖片，請改選其他檔案');
   }
+
+  try {
+    validateImageDimensions(bitmap.width, bitmap.height);
+    const dimensionsMatch = bitmap.width === metadata.width && bitmap.height === metadata.height;
+    if (!dimensionsMatch) throw new Error('圖片尺寸與檔案資訊不符，請改選其他檔案');
+  } finally {
+    bitmap.close();
+  }
+}
+
+function validateImageDimensions(width: number, height: number) {
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) {
+    throw new Error('圖片格式或尺寸資訊有誤，請改選其他檔案');
+  }
+  if (width > MAX_IMAGE_EDGE || height > MAX_IMAGE_EDGE) throw new Error('圖片長寬不可超過 8192 像素');
+  if (width * height > MAX_IMAGE_PIXELS) throw new Error('圖片總像素不可超過 32,000,000');
 }
 
 export async function saveUploadedBackground(file: File): Promise<void> {

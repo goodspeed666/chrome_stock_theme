@@ -37,15 +37,17 @@ test('loads the built extension in an isolated Chromium profile', async () => {
     await worker.evaluate(() => {
       const workerGlobal = globalThis as typeof globalThis & { __providerFetchCount: number };
       workerGlobal.__providerFetchCount = 0;
-      const globals = workerGlobal as typeof workerGlobal & { __providerFetchMode: string; __providerFetchUrls: string[]; __sameTimestampMicros: number; __sameTimestampLimitUp?: boolean };
+      const globals = workerGlobal as typeof workerGlobal & { __providerFetchMode: string; __providerFetchUrls: string[]; __providerFetchFinnhubTokens: string[]; __sameTimestampMicros: number; __sameTimestampLimitUp?: boolean };
       globals.__providerFetchMode = 'count';
       globals.__providerFetchUrls = [];
+      globals.__providerFetchFinnhubTokens = [];
       const realFetch = globalThis.fetch.bind(globalThis);
       globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-          const requestGlobals = globalThis as typeof workerGlobal & { __providerFetchMode: string; __providerFetchUrls: string[]; __sameTimestampMicros: number; __sameTimestampLimitUp?: boolean };
+        const requestGlobals = globalThis as typeof workerGlobal & { __providerFetchMode: string; __providerFetchUrls: string[]; __providerFetchFinnhubTokens: string[]; __sameTimestampMicros: number; __sameTimestampLimitUp?: boolean };
         const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
         requestGlobals.__providerFetchCount += 1;
         requestGlobals.__providerFetchUrls.push(url);
+        requestGlobals.__providerFetchFinnhubTokens.push(new Headers(init?.headers).get('X-Finnhub-Token') ?? '');
         if (requestGlobals.__providerFetchMode === 'fugle-equal') {
           return Promise.resolve(new Response(JSON.stringify({ lastTrade: { price: 101, time: requestGlobals.__sameTimestampMicros }, previousClose: 99, isLimitUpPrice: requestGlobals.__sameTimestampLimitUp === true, isLimitDownPrice: false, isTrial: false, tradingHalt: { isHalted: false }, isLimitUpHalt: false, isLimitDownHalt: false }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
         }
@@ -103,9 +105,10 @@ test('loads the built extension in an isolated Chromium profile', async () => {
     };
     await page.evaluate((state) => chrome.runtime.sendMessage({ type: 'STATE_MUTATE', operation: { type: 'replace', state } }), lookupState);
     await worker.evaluate(() => {
-      const globals = globalThis as typeof globalThis & { __providerFetchCount: number; __providerFetchMode: string; __providerFetchUrls: string[] };
+      const globals = globalThis as typeof globalThis & { __providerFetchCount: number; __providerFetchMode: string; __providerFetchUrls: string[]; __providerFetchFinnhubTokens: string[] };
       globals.__providerFetchCount = 0;
       globals.__providerFetchUrls = [];
+      globals.__providerFetchFinnhubTokens = [];
       globals.__providerFetchMode = 'symbol-name';
     });
     await page.getByRole('button', { name: '新增股票' }).click();
@@ -174,9 +177,10 @@ test('loads the built extension in an isolated Chromium profile', async () => {
     expect(lookupNotifications).toEqual({});
 
     await worker.evaluate(() => {
-      const globals = globalThis as typeof globalThis & { __providerFetchCount: number; __providerFetchMode: string; __providerFetchUrls: string[] };
+      const globals = globalThis as typeof globalThis & { __providerFetchCount: number; __providerFetchMode: string; __providerFetchUrls: string[]; __providerFetchFinnhubTokens: string[] };
       globals.__providerFetchCount = 0;
       globals.__providerFetchUrls = [];
+      globals.__providerFetchFinnhubTokens = [];
       globals.__providerFetchMode = 'symbol-name';
     });
     await page.getByRole('button', { name: '新增股票' }).click();
@@ -185,8 +189,9 @@ test('loads the built extension in an isolated Chromium profile', async () => {
     await usLookupDialog.getByLabel('股票代號').fill('AAPL');
     await expect(usLookupDialog.getByText('Apple Inc.')).toBeVisible();
     expect(await worker.evaluate(() => (globalThis as typeof globalThis & { __providerFetchUrls: string[] }).__providerFetchUrls)).toEqual([
-      'https://finnhub.io/api/v1/search?q=AAPL&token=fake-finnhub-key',
+      'https://finnhub.io/api/v1/search?q=AAPL',
     ]);
+    expect(await worker.evaluate(() => (globalThis as typeof globalThis & { __providerFetchFinnhubTokens: string[] }).__providerFetchFinnhubTokens)).toEqual(['fake-finnhub-key']);
     await usLookupDialog.getByRole('button', { name: '取消' }).click();
     expect(await page.evaluate(() => chrome.notifications.getAll())).toEqual({});
 
