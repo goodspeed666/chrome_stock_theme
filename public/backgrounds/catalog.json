@@ -1,0 +1,122 @@
+[
+  {
+    "label": "曙光山谷",
+    "author": "David Marcu davidmarcu",
+    "source": "https://commons.wikimedia.org/wiki/File:Alone_in_the_unspoilt_wilderness_(Unsplash).jpg",
+    "license": "CC0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "width": 3506,
+    "height": 2329,
+    "id": "scene-01",
+    "asset": "backgrounds/01.jpg",
+    "thumbnail": "backgrounds/01-thumb.jpg"
+  },
+  {
+    "label": "冰島彩色山坡",
+    "author": "Syony",
+    "source": "https://commons.wikimedia.org/wiki/File:Colorful_mountain_slope_in_Landmannalaugar.jpg",
+    "license": "CC0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "width": 3840,
+    "height": 2160,
+    "id": "scene-02",
+    "asset": "backgrounds/02.jpg",
+    "thumbnail": "backgrounds/02-thumb.jpg"
+  },
+  {
+    "label": "達利山雪線",
+    "author": "Stefan Serena",
+    "source": "https://commons.wikimedia.org/wiki/File:Darley_Mountain,_S_aspect.jpg",
+    "license": "CC0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "width": 3618,
+    "height": 1939,
+    "id": "scene-03",
+    "asset": "backgrounds/03.jpg",
+    "thumbnail": "backgrounds/03-thumb.jpg"
+  },
+  {
+    "label": "陶努斯藍調",
+    "author": "Greg200906",
+    "source": "https://commons.wikimedia.org/wiki/File:Panoramic_shot_of_the_Taunus_mountain_range.png",
+    "license": "CC0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "width": 4000,
+    "height": 2252,
+    "id": "scene-04",
+    "asset": "backgrounds/04.png",
+    "thumbnail": "backgrounds/04-thumb.jpg"
+  },
+  {
+    "label": "巴杜克湖清流",
+    "author": "Alexander Roumega",
+    "source": "https://commons.wikimedia.org/wiki/File:First_Badukskoe_Lake_water.jpg",
+    "license": "CC0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "width": 4000,
+    "height": 2250,
+    "id": "scene-05",
+    "asset": "backgrounds/05.jpg",
+    "thumbnail": "backgrounds/05-thumb.jpg"
+  },
+  {
+    "label": "紐西蘭湖畔",
+    "author": "David Nind",
+    "source": "https://commons.wikimedia.org/wiki/File:Lake_Kaurapataka_-_05.jpg",
+    "license": "CC0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "width": 4032,
+    "height": 1816,
+    "id": "scene-06",
+    "asset": "backgrounds/06.jpg",
+    "thumbnail": "backgrounds/06-thumb.jpg"
+  },
+  {
+    "label": "加拿大明尼旺卡湖",
+    "author": "Vlunyak",
+    "source": "https://commons.wikimedia.org/wiki/File:Lake_Minnewanka,_Canada.jpg",
+    "license": "CC0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "width": 3840,
+    "height": 2880,
+    "id": "scene-07",
+    "asset": "backgrounds/07.jpg",
+    "thumbnail": "backgrounds/07-thumb.jpg"
+  },
+  {
+    "label": "澳洲海岸暮色",
+    "author": "Lunaseeker",
+    "source": "https://commons.wikimedia.org/wiki/File:Early_Sunset_Over_Hill_And_Ocean,_New_South_Wales,_Australia.jpg",
+    "license": "CC0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "width": 4032,
+    "height": 1977,
+    "id": "scene-08",
+    "asset": "backgrounds/08.jpg",
+    "thumbnail": "backgrounds/08-thumb.jpg"
+  },
+  {
+    "label": "蓬塔圖納海岸",
+    "author": "BrickLightning",
+    "source": "https://commons.wikimedia.org/wiki/File:Punta-Tuna-Beach-Ocean-Sky.jpg",
+    "license": "CC0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "width": 5472,
+    "height": 3648,
+    "id": "scene-09",
+    "asset": "backgrounds/09.jpg",
+    "thumbnail": "backgrounds/09-thumb.jpg"
+  },
+  {
+    "label": "霧中松林",
+    "author": "Pacific Austin _pacifist",
+    "source": "https://commons.wikimedia.org/wiki/File:Fog_descending_on_a_pine_forest_(Unsplash).jpg",
+    "license": "CC0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "width": 3264,
+    "height": 2448,
+    "id": "scene-10",
+    "asset": "backgrounds/10.jpg",
+    "thumbnail": "backgrounds/10-thumb.jpg"
+  }
+]

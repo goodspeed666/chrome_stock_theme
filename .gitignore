@@ -1,0 +1,10 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+.DS_Store
+.codegraph/
+artifacts/*.zip
+.env
+.env.*
+*.tsbuildinfo

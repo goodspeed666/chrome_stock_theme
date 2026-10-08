@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "山嵐股票桌面",
+  "description": "在 Chrome 新分頁整理台股與美股觀察清單。",
+  "version": "1.0.0",
+  "minimum_chrome_version": "120",
+  "chrome_url_overrides": { "newtab": "index.html" },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "permissions": ["storage", "alarms", "notifications"],
+  "host_permissions": ["https://api.fugle.tw/*", "https://finnhub.io/*"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
