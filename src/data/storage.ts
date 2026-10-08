@@ -1,4 +1,4 @@
-import { DEFAULT_STATE, type AppState } from '../domain/types';
+import { DEFAULT_STATE, normalizeAppearanceTheme, type AppState } from '../domain/types';
 
 export const STATE_KEY = 'stockDesktopState.v1';
 const LOCAL_KEY = STATE_KEY;
@@ -18,6 +18,7 @@ function normalizeState(value: unknown): AppState {
       limitNotificationsEnabled: typeof state.settings?.limitNotificationsEnabled === 'boolean' ? state.settings.limitNotificationsEnabled : true,
       quoteRefreshSeconds,
       accountSyncEnabled: state.settings?.accountSyncEnabled === true,
+      appearanceTheme: normalizeAppearanceTheme(state.settings?.appearanceTheme),
     },
     background: { ...DEFAULT_STATE.background, ...state.background, selectedId: state.background?.selectedId === 'default' ? 'scene-01' : (state.background?.selectedId ?? DEFAULT_STATE.background.selectedId) },
   };

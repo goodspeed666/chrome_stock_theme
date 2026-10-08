@@ -43,7 +43,7 @@ describe('Chrome account sync snapshots', () => {
       id: '550e8400-e29b-41d4-a716-446655440001', market: 'TW', symbol: '2330', name: '台積電', customLabel: '主力', order: 0,
       groupId: 'group-tw', averageCost: 500, shares: 20, gainDisplay: 'money', alert: { above: 700 },
     });
-    expect(snapshot.settings).toEqual({ welcomeManuallyHidden: false, limitNotificationsEnabled: true, quoteRefreshSeconds: 30 });
+    expect(snapshot.settings).toEqual({ welcomeManuallyHidden: false, limitNotificationsEnabled: true, quoteRefreshSeconds: 30, appearanceTheme: 'forest' });
     expect(snapshot.background).toEqual({ selectedId: 'scene-01', brightness: 0.58 });
     for (const secretOrLocalOnly of ['do-not-sync-fugle-secret', 'do-not-sync-finnhub-secret', 'notificationsEnabled', 'notificationPermission', '"quote":', 'pendingNotification', 'alertLatches', '"selectedId":"custom"']) {
       expect(serialized).not.toContain(secretOrLocalOnly);

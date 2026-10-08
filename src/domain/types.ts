@@ -1,5 +1,12 @@
 export type Market = 'TW' | 'US';
 export type GainDisplay = 'percent' | 'money';
+export const APPEARANCE_THEMES = ['forest', 'midnight', 'sand', 'graphite', 'dusk', 'sky'] as const;
+export type AppearanceTheme = typeof APPEARANCE_THEMES[number];
+
+export function normalizeAppearanceTheme(value: unknown): AppearanceTheme {
+  return APPEARANCE_THEMES.includes(value as AppearanceTheme) ? value as AppearanceTheme : 'forest';
+}
+
 export type QuoteStatus = 'live' | 'stale' | 'closed' | 'not-connected' | 'invalid-symbol' | 'credentials' | 'rate-limited' | 'network-error' | 'provider-error' | 'no-trade';
 
 export interface PriceAlert {
@@ -78,6 +85,7 @@ export interface AppSettings {
   limitNotificationsEnabled: boolean;
   quoteRefreshSeconds: 30 | 60 | 120 | 300;
   accountSyncEnabled: boolean;
+  appearanceTheme: AppearanceTheme;
 }
 
 export interface AppState {
@@ -105,6 +113,7 @@ export const DEFAULT_STATE: AppState = {
     limitNotificationsEnabled: true,
     quoteRefreshSeconds: 30,
     accountSyncEnabled: false,
+    appearanceTheme: 'forest',
   },
   background: { selectedId: 'scene-01', brightness: 0.58 },
 };

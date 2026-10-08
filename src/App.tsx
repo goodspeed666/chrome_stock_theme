@@ -119,6 +119,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = state.settings.appearanceTheme;
+  }, [state.settings.appearanceTheme]);
+
+  useEffect(() => {
     let mounted = true;
     void Promise.all([adapter.load(), loadBackgroundCatalog().catch(() => [])]).then(([initial, backgrounds]) => {
       if (!mounted) return;
@@ -280,7 +284,7 @@ export default function App() {
         <span className="date-gregorian">{displayedDate.gregorian}</span>
         <span className="date-lunar">農曆 {displayedDate.lunar}</span>
       </time>
-      <div className="top-actions"><span className={`connection ${status.tone}`}><i />{status.label}</span><button className="icon-button top-refresh" aria-label="立即更新行情" title="立即更新行情" onClick={() => void refreshQuotes()} disabled={refreshing || state.stocks.length === 0}><Icon name="refresh" size={17} className={refreshing ? 'spinning' : ''} /></button><button className="icon-button" aria-label="設定" title="設定" onClick={() => setSettingsOpen(true)}><Icon name="settings" size={18} /></button><button className="primary-button add-stock-button" onClick={() => setStockDialog({})}><Icon name="plus" size={16} />新增股票</button></div>
+      <div className="top-actions"><span className={`connection ${status.tone}`}><i />{status.label}</span><button className="icon-button toolbar-icon-button top-refresh" aria-label="立即更新行情" title="立即更新行情" onClick={() => void refreshQuotes()} disabled={refreshing || state.stocks.length === 0}><Icon name="refresh" size={20} className={refreshing ? 'spinning' : ''} /></button><button className="icon-button toolbar-icon-button" aria-label="設定" title="設定" onClick={() => setSettingsOpen(true)}><Icon name="settings" size={20} /></button><button className="primary-button add-stock-button" onClick={() => setStockDialog({})}><Icon name="plus" size={16} />新增股票</button></div>
     </header>
 
     <div id="top" className={`page-content ${state.stocks.length ? 'has-stocks' : 'is-empty'}`}>

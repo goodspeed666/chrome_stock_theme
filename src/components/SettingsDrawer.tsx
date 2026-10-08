@@ -30,7 +30,7 @@ interface SettingsDrawerProps {
   onRestoreWelcome: () => Promise<void>;
   onTestNotification: () => Promise<string>;
   onNotificationChange: (enabled: boolean, permission: NotificationPermission | 'unsupported') => Promise<void>;
-  onSettingsChange: (settings: Partial<Pick<AppSettings, 'limitNotificationsEnabled' | 'quoteRefreshSeconds'>>) => Promise<void>;
+  onSettingsChange: (settings: Partial<Pick<AppSettings, 'limitNotificationsEnabled' | 'quoteRefreshSeconds' | 'appearanceTheme'>>) => Promise<void>;
   hasBackground: boolean;
 }
 
@@ -156,7 +156,7 @@ export function SettingsDrawer({ state, backgrounds, onClose, onSaveKeys, onBack
     finally { setRestoringWelcome(false); }
   }
 
-  async function savePreference(settings: Partial<Pick<AppSettings, 'limitNotificationsEnabled' | 'quoteRefreshSeconds'>>) {
+  async function savePreference(settings: Partial<Pick<AppSettings, 'limitNotificationsEnabled' | 'quoteRefreshSeconds' | 'appearanceTheme'>>) {
     setMessage('');
     try { await onSettingsChange(settings); }
     catch (error) { setMessage(error instanceof Error ? error.message : '設定儲存失敗'); }
@@ -166,6 +166,25 @@ export function SettingsDrawer({ state, backgrounds, onClose, onSaveKeys, onBack
 
   return <Dialog title="設定" description="金鑰、提醒與背景都保存在這部裝置。" onClose={onClose} className="settings-drawer" closeLabel="關閉設定">
     <div className="settings-scroll">
+      <section className="settings-section appearance-section">
+        <div className="settings-section-heading"><span className="section-icon appearance-section-icon" aria-hidden="true">Aa</span><div><h3>外觀主題</h3><p>選擇投資組合的色彩風格，切換後立即套用。</p></div></div>
+        <fieldset className="theme-picker">
+          <legend className="visually-hidden">選擇外觀主題</legend>
+          {([
+            { id: 'forest', label: '山嵐', description: '苔綠玻璃', swatch: 'forest' },
+            { id: 'midnight', label: '午夜', description: '海軍藍・冰藍', swatch: 'midnight' },
+            { id: 'sand', label: '暖砂', description: '象牙白・香檳', swatch: 'sand' },
+            { id: 'graphite', label: '墨曜', description: '石墨黑・鉑銀', swatch: 'graphite' },
+            { id: 'dusk', label: '暮紫', description: '紫灰・薰衣草', swatch: 'dusk' },
+            { id: 'sky', label: '晴空', description: '冰白・湖水藍', swatch: 'sky' },
+          ] as const).map((theme) => <label className={`theme-option ${state.settings.appearanceTheme === theme.id ? 'selected' : ''}`} key={theme.id}>
+            <input type="radio" name="appearanceTheme" value={theme.id} checked={state.settings.appearanceTheme === theme.id} onChange={() => void savePreference({ appearanceTheme: theme.id })} />
+            <span className={`theme-preview theme-preview-${theme.swatch}`} aria-hidden="true"><i /><i /><i /></span>
+            <span className="theme-option-copy"><b>{theme.label}</b><small>{theme.description}</small></span>
+          </label>)}
+        </fieldset>
+      </section>
+
       <section className="settings-section">
         <div className="settings-section-heading"><span className="section-icon"><Icon name="refresh" /></span><div><h3>行情來源</h3><p>使用個人 API 金鑰取得行情快照。</p></div></div>
         <form className="stack-form" onSubmit={saveKeys}>

@@ -24,7 +24,7 @@ const statusLabels: Record<string, string> = {
 };
 
 function currency(market: Stock['market'], value: number) {
-  return `${market === 'TW' ? 'NT$' : 'US$'}${formatStockPrice(value)}`;
+  return `${market === 'TW' ? 'NT$' : 'US$'}${formatStockPrice(value, market)}`;
 }
 
 function signedMoney(market: Stock['market'], value: number) {
@@ -96,11 +96,11 @@ export function StockCard({ stock, groups, onEdit, onRemove, onMove, onGainDispl
     <div className={`stock-values-row ${gain ? 'has-gain' : ''} ${longGainMoney ? 'has-long-gain' : ''}`}>
       <div className="stock-quote-block">
         <div className="price-row">
-          {stock.quote ? <div className="current-price">{formatStockPrice(stock.quote.price)}</div> : <div className="price-placeholder">—</div>}
+          {stock.quote ? <div className="current-price">{formatStockPrice(stock.quote.price, stock.market)}</div> : <div className="price-placeholder">—</div>}
           <span className={`quote-status ${stock.quoteStatus}`}><i />{stock.quote ? quoteLabel : (statusLabels[stock.quoteStatus] ?? '等待行情')}</span>
         </div>
         {stock.quote && <div className={`day-move ${stock.quote.dayChange !== null && stock.quote.dayChange > 0 ? 'up' : stock.quote.dayChange !== null && stock.quote.dayChange < 0 ? 'down' : 'flat'}`}>
-          <span>今日</span><b>{formatSignedStockPrice(stock.quote.dayChange)}</b><span>({signed(stock.quote.dayChangePercent)}%)</span>
+          <span>今日</span><b>{formatSignedStockPrice(stock.quote.dayChange, stock.market)}</b><span className="day-move-percent">{stock.quote.dayChangePercent === null ? '—' : `${signed(stock.quote.dayChangePercent)}%`}</span>
         </div>}
       </div>
       {gain && <button type="button" className={`gain-panel ${gain.percent > 0 ? 'up' : gain.percent < 0 ? 'down' : 'flat'}`} onClick={onGainDisplayChange} aria-label={`損益顯示切換，目前${stock.gainDisplay === 'percent' ? '百分比' : '金額'}，切換為${stock.gainDisplay === 'percent' ? '金額' : '百分比'}`} title="點擊切換百分比與金額">

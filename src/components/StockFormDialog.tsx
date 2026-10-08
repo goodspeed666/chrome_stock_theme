@@ -72,6 +72,7 @@ export function StockFormDialog({ state, stock, initialGroupId, onClose, onSave,
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!validSymbol) { setError(market === 'TW' ? '請輸入正確台股代號，例如 2330 或 00679B' : '請輸入正確美股代號，例如 AAPL 或 BRK.B'); return; }
+    if (!groupId) { setError('請選擇股票分區'); return; }
     const identityChanged = Boolean(stock && (stock.market !== market || stock.symbol.toUpperCase() !== normalizedSymbol));
     const typedNameIsPrevious = identityChanged && name.trim() === stock?.name;
     const resolvedName = stock
@@ -94,9 +95,9 @@ export function StockFormDialog({ state, stock, initialGroupId, onClose, onSave,
   return <Dialog title={stock ? '編輯股票' : '新增股票'} description="持股與提醒資料只保存在這部裝置。" onClose={onClose} className="form-dialog">
     <form className="stack-form" onSubmit={submit} noValidate>
       <div className="form-grid two">
-          <label>市場<select value={market} onChange={(event) => setMarket(event.target.value as 'TW' | 'US')}><option value="TW">台股 · TWD</option><option value="US">美股 · USD</option></select></label>
-          <div className="symbol-field"><label htmlFor="stock-symbol-input">股票代號</label><div className="symbol-input-wrap">
-            <input id="stock-symbol-input" value={symbol} onChange={(event) => setSymbol(event.target.value.toUpperCase())} autoCapitalize="characters" autoComplete="off" required placeholder={market === 'TW' ? '例如 2330、00679B' : '例如 AAPL、BRK.B'} />
+          <div className="field-control"><label htmlFor="stock-market-input">市場 <span className="required-marker" aria-hidden="true">*</span></label><select id="stock-market-input" aria-label="市場" value={market} onChange={(event) => setMarket(event.target.value as 'TW' | 'US')} required><option value="TW">台股 · TWD</option><option value="US">美股 · USD</option></select></div>
+          <div className="symbol-field"><label htmlFor="stock-symbol-input">股票代號 <span className="required-marker" aria-hidden="true">*</span></label><div className="symbol-input-wrap">
+            <input id="stock-symbol-input" aria-label="股票代號" value={symbol} onChange={(event) => setSymbol(event.target.value.toUpperCase())} autoCapitalize="characters" autoComplete="off" required placeholder={market === 'TW' ? '例如 2330、00679B' : '例如 AAPL、BRK.B'} />
             {!stock && lookupStatus === 'success' && currentLookupResult && <span className="symbol-name-suffix" title={currentLookupResult.name} aria-live="polite">{currentLookupResult.name}</span>}
           </div></div>
         </div>
@@ -108,19 +109,19 @@ export function StockFormDialog({ state, stock, initialGroupId, onClose, onSave,
         </>}
       </div>}
       <div className="form-grid two">
-        {stock && <label>名稱 <span className="optional">可留空，由行情來源補上</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="公司或 ETF 名稱" /></label>}
-        <label>自訂標籤 <span className="optional">選填</span><input value={customLabel} onChange={(event) => setCustomLabel(event.target.value)} placeholder="例如：退休組合" /></label>
+        {stock && <label>名稱<input value={name} onChange={(event) => setName(event.target.value)} placeholder="公司或 ETF 名稱" /></label>}
+        <label>自訂標籤<input value={customLabel} onChange={(event) => setCustomLabel(event.target.value)} placeholder="例如：退休組合" /></label>
       </div>
-      <label>分區<select value={groupId} onChange={(event) => setGroupId(event.target.value)}>{state.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
-      <div className="form-section-title">持股資料 <span>可只追蹤，不必填持股</span></div>
+      <div className="field-control"><label htmlFor="stock-group-input">分區 <span className="required-marker" aria-hidden="true">*</span></label><select id="stock-group-input" aria-label="分區" value={groupId} onChange={(event) => setGroupId(event.target.value)} required>{state.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></div>
+      <div className="form-section-title">持股資料</div>
       <div className="form-grid two">
-        <label>每股買入均價 <span className="optional">{market === 'TW' ? 'TWD' : 'USD'}，選填</span><input inputMode="decimal" value={averageCost} onChange={(event) => setAverageCost(event.target.value)} placeholder="0.00" /></label>
-        <label>持股數量 <span className="optional">{market === 'TW' ? '股' : '股，可填小數'}</span><input inputMode="decimal" value={shares} onChange={(event) => setShares(event.target.value)} placeholder="0" /></label>
+        <div className="field-control"><label htmlFor="stock-average-cost-input">每股買入均價</label><div className="input-suffix-group"><input id="stock-average-cost-input" aria-describedby="stock-average-cost-unit" inputMode="decimal" value={averageCost} onChange={(event) => setAverageCost(event.target.value)} placeholder="0.00" /><span id="stock-average-cost-unit" className="input-unit">{market === 'TW' ? 'TWD' : 'USD'}</span></div></div>
+        <div className="field-control"><label htmlFor="stock-shares-input">持股數量</label><div className="input-suffix-group"><input id="stock-shares-input" aria-describedby="stock-shares-unit" inputMode="decimal" value={shares} onChange={(event) => setShares(event.target.value)} placeholder="0" /><span id="stock-shares-unit" className="input-unit">股</span></div></div>
       </div>
       <div className="form-section-title">到價提醒 <span>高於與低於分開設定</span></div>
       <div className="form-grid two">
-        <label>高於 <span className="optional">{market === 'TW' ? 'TWD' : 'USD'}</span><input inputMode="decimal" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="不設定" /></label>
-        <label>低於 <span className="optional">{market === 'TW' ? 'TWD' : 'USD'}</span><input inputMode="decimal" value={below} onChange={(event) => setBelow(event.target.value)} placeholder="不設定" /></label>
+        <div className="field-control"><label htmlFor="stock-alert-above-input">高於</label><div className="input-suffix-group"><input id="stock-alert-above-input" aria-describedby="stock-alert-above-unit" inputMode="decimal" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="不設定" /><span id="stock-alert-above-unit" className="input-unit">{market === 'TW' ? 'TWD' : 'USD'}</span></div></div>
+        <div className="field-control"><label htmlFor="stock-alert-below-input">低於</label><div className="input-suffix-group"><input id="stock-alert-below-input" aria-describedby="stock-alert-below-unit" inputMode="decimal" value={below} onChange={(event) => setBelow(event.target.value)} placeholder="不設定" /><span id="stock-alert-below-unit" className="input-unit">{market === 'TW' ? 'TWD' : 'USD'}</span></div></div>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
       <p className="form-note">損益不含手續費、交易稅與股息。未填持股數量時，金額顯示每股價差。</p>

@@ -1,4 +1,4 @@
-import { DEFAULT_STATE, type AppState, type BackgroundSettings, type GainDisplay, type Market, type PriceAlert, type Stock, type StockGroup } from '../domain/types';
+import { APPEARANCE_THEMES, DEFAULT_STATE, type AppState, type AppearanceTheme, type BackgroundSettings, type GainDisplay, type Market, type PriceAlert, type Stock, type StockGroup } from '../domain/types';
 
 export const ACCOUNT_SYNC_KEY = 'stockDesktopAccountSync.v1';
 export const ACCOUNT_SYNC_META_KEY = 'stockDesktopAccountSyncMeta.v1';
@@ -28,7 +28,7 @@ export interface AccountSyncSnapshot extends AccountSyncVersion {
   version: 1;
   groups: StockGroup[];
   stocks: SyncStock[];
-  settings: Pick<AppState['settings'], 'welcomeManuallyHidden' | 'limitNotificationsEnabled' | 'quoteRefreshSeconds'>;
+  settings: Pick<AppState['settings'], 'welcomeManuallyHidden' | 'limitNotificationsEnabled' | 'quoteRefreshSeconds' | 'appearanceTheme'>;
   background: BackgroundSettings;
 }
 
@@ -126,6 +126,7 @@ function portableData(state: AppState, fallbackBackground?: BackgroundSettings) 
       welcomeManuallyHidden: state.settings.welcomeManuallyHidden,
       limitNotificationsEnabled: state.settings.limitNotificationsEnabled,
       quoteRefreshSeconds: state.settings.quoteRefreshSeconds,
+      appearanceTheme: state.settings.appearanceTheme,
     },
     background: {
       selectedId: background && isBuiltInBackgroundId(background.selectedId) ? background.selectedId : DEFAULT_STATE.background.selectedId,
@@ -152,6 +153,8 @@ export function parseAccountSyncSnapshot(value: unknown): AccountSyncSnapshot | 
   if (!isRecord(settings) || typeof settings.welcomeManuallyHidden !== 'boolean'
     || typeof settings.limitNotificationsEnabled !== 'boolean'
     || typeof settings.quoteRefreshSeconds !== 'number' || ![30, 60, 120, 300].includes(settings.quoteRefreshSeconds)) return null;
+  const appearanceTheme: unknown = Object.hasOwn(settings, 'appearanceTheme') ? settings.appearanceTheme : 'forest';
+  if (!APPEARANCE_THEMES.includes(appearanceTheme as AppearanceTheme)) return null;
   const background = value.background;
   if (!isRecord(background) || !isBuiltInBackgroundId(background.selectedId)
     || typeof background.brightness !== 'number' || !Number.isFinite(background.brightness)
@@ -168,6 +171,7 @@ export function parseAccountSyncSnapshot(value: unknown): AccountSyncSnapshot | 
       welcomeManuallyHidden: settings.welcomeManuallyHidden,
       limitNotificationsEnabled: settings.limitNotificationsEnabled,
       quoteRefreshSeconds: settings.quoteRefreshSeconds as AccountSyncSnapshot['settings']['quoteRefreshSeconds'],
+      appearanceTheme: appearanceTheme as AppearanceTheme,
     },
     background: { selectedId: background.selectedId, brightness: background.brightness },
   };

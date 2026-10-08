@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Dialog } from '../../src/components/Dialog';
@@ -39,7 +39,41 @@ describe('dialog and quote error feedback', () => {
     const noop = vi.fn();
     render(<StockCard stock={staleStock} groups={[{ id: 'group-tw', name: '台股', order: 0 }]} onEdit={noop} onRemove={noop} onMove={noop} onGainDisplayChange={noop} onRetryNotification={noop} onDragStart={noop} onDrop={noop} dragging={false} />);
     expect(screen.getByText('1,000')).toBeVisible();
+    expect(screen.getByText('+20.00')).toBeVisible();
     expect(screen.getByRole('status')).toHaveTextContent('最近成交仍保留 · 請求過於頻繁');
+  });
+
+  it('keeps two decimals on US quotes, price changes, and alert thresholds above 100', () => {
+    const noop = vi.fn();
+    const usStock: Stock = {
+      ...staleStock,
+      id: 'us-a', market: 'US', symbol: 'NVDA', name: 'NVIDIA', groupId: 'group-us',
+      alert: { above: 139.49, below: 105.25 },
+      quoteStatus: 'live', quoteError: undefined,
+      quote: { ...staleStock.quote!, price: 184.27, dayChange: 124.56, dayChangePercent: 5.91 },
+    };
+    render(<StockCard stock={usStock} groups={[{ id: 'group-us', name: '美股', order: 0 }]} onEdit={noop} onRemove={noop} onMove={noop} onGainDisplayChange={noop} onRetryNotification={noop} onDragStart={noop} onDrop={noop} dragging={false} />);
+    const card = screen.getByRole('article', { name: 'NVIDIA，美股 NVDA' });
+    expect(within(card).getByText('184.27')).toBeVisible();
+    expect(within(card).getByText('+124.56')).toBeVisible();
+    expect(within(card).getByText('高於 US$139.49')).toBeVisible();
+    expect(within(card).getByText('低於 US$105.25')).toBeVisible();
+  });
+
+  it('retains Taiwan truncation for prices and alert thresholds at or above 100', () => {
+    const noop = vi.fn();
+    const twStock: Stock = {
+      ...staleStock,
+      id: 'tw-b', symbol: '0050', name: '元大台灣50',
+      alert: { above: 139.49, below: 95.25 },
+      quote: { ...staleStock.quote!, price: 184.27, dayChange: 124.56, dayChangePercent: 5.91 },
+    };
+    render(<StockCard stock={twStock} groups={[{ id: 'group-tw', name: '台股', order: 0 }]} onEdit={noop} onRemove={noop} onMove={noop} onGainDisplayChange={noop} onRetryNotification={noop} onDragStart={noop} onDrop={noop} dragging={false} />);
+    const card = screen.getByRole('article', { name: '元大台灣50，台股 0050' });
+    expect(within(card).getByText('184')).toBeVisible();
+    expect(within(card).getByText('+124')).toBeVisible();
+    expect(within(card).getByText('高於 NT$139')).toBeVisible();
+    expect(within(card).getByText('低於 NT$95.25')).toBeVisible();
   });
 
   it('shows a retry action for a persisted pending notification without a failure state', () => {

@@ -151,7 +151,7 @@ test('loads the built extension in an isolated Chromium profile', async () => {
     expect(narrowField.inputValue).toBe('2330');
     expect(narrowField.inputWidth).toBeGreaterThan(30);
     expect(narrowField.inputRight).toBeLessThanOrEqual(narrowField.suffixLeft);
-    expect(narrowField.inputFontSize).toBe('14px');
+    expect(narrowField.inputFontSize).toBe('16px');
     expect(narrowField.suffixFontSize).toBe('14px');
     expect(narrowField.suffixOverflow).toBe('hidden');
     expect(narrowField.suffixTextOverflow).toBe('ellipsis');
