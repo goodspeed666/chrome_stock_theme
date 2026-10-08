@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Stock, StockGroup } from '../domain/types';
 import { calculateGain } from '../domain/portfolio';
 import { formatSignedStockPrice, formatStockPrice } from '../domain/priceDisplay';
@@ -8,6 +8,7 @@ interface StockCardProps {
   stock: Stock;
   groups: StockGroup[];
   onEdit: () => void;
+  onSell: () => void;
   onRemove: () => void;
   onMove: (groupId: string, index: number) => void;
   onGainDisplayChange: () => void;
@@ -22,6 +23,10 @@ const statusLabels: Record<string, string> = {
   'invalid-symbol': '無效代號', credentials: '金鑰錯誤', 'rate-limited': '請求過於頻繁',
   'network-error': '網路連線失敗', 'provider-error': '行情來源錯誤', 'no-trade': '尚無新成交',
 };
+
+function MenuActionIcon({ emoji }: { emoji: string }) {
+  return <span className="card-menu-action-icon" aria-hidden="true">{emoji}</span>;
+}
 
 function currency(market: Stock['market'], value: number) {
   return `${market === 'TW' ? 'NT$' : 'US$'}${formatStockPrice(value, market)}`;
@@ -48,8 +53,10 @@ function stamp(stock: Stock) {
   return new Intl.DateTimeFormat('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: stock.market === 'TW' ? 'Asia/Taipei' : 'America/New_York' }).format(stock.quote.timestamp);
 }
 
-export function StockCard({ stock, groups, onEdit, onRemove, onMove, onGainDisplayChange, onRetryNotification, onDragStart, onDrop, dragging }: StockCardProps) {
+export function StockCard({ stock, groups, onEdit, onSell, onRemove, onMove, onGainDisplayChange, onRetryNotification, onDragStart, onDrop, dragging }: StockCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDetailsElement>(null);
+  const menuSummaryRef = useRef<HTMLElement>(null);
   const displayName = stock.customLabel || stock.name || stock.symbol;
   const quoteLabel = stock.quote ? (stock.quoteStatus === 'stale' ? '報價過期' : stock.quoteStatus === 'closed' ? '休市資料' : '最新成交') : statusLabels[stock.quoteStatus];
   let gain: ReturnType<typeof calculateGain> | null = null;
@@ -74,6 +81,30 @@ export function StockCard({ stock, groups, onEdit, onRemove, onMove, onGainDispl
   const notificationFailure = stock.notificationFailure || stock.limitNotificationFailure;
   const pendingLimitLabel = stock.pendingLimitNotification?.direction === 'limit-up' ? '漲停通知待送出' : stock.pendingLimitNotification?.direction === 'limit-down' ? '跌停通知待送出' : '通知待送出';
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOnOutside = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && menuRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setMenuOpen(false);
+      menuSummaryRef.current?.focus();
+    };
+
+    document.addEventListener('pointerdown', closeOnOutside);
+    document.addEventListener('click', closeOnOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutside);
+      document.removeEventListener('click', closeOnOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [menuOpen]);
+
   return <article className={`stock-card ${dragging ? 'is-dragging' : ''} ${limitUp ? 'is-limit-up' : ''}`} draggable onDragStart={onDragStart} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); onDrop(stock.order); }} aria-label={`${displayName}，${stock.market === 'TW' ? '台股' : '美股'} ${stock.symbol}`}>
     {limitUp && <svg className="stock-fireworks" viewBox="0 0 120 100" aria-hidden="true" focusable="false">
       <g transform="translate(80 20)"><g className="firework-burst burst-one"><path d="M0-13V-7M0 7V13M-13 0H-7M7 0H13M-9-9L-5-5M5 5L9 9M9-9L5-5M-5 5L-9 9" /><circle r="1.8" /></g></g>
@@ -82,13 +113,14 @@ export function StockCard({ stock, groups, onEdit, onRemove, onMove, onGainDispl
     </svg>}
     <div className="stock-card-top">
       <div className="stock-id"><span className={`market-pill ${stock.market.toLowerCase()}`}>{stock.market === 'TW' ? 'TW' : 'US'}</span><span className="stock-symbol">{stock.symbol}</span>{limitUp && <span className="limit-up-badge" role="status">漲停</span>}<span className="drag-grip" aria-hidden="true"><Icon name="grip" size={17} /></span></div>
-      <details className="card-menu" open={menuOpen} onToggle={(event) => setMenuOpen((event.currentTarget as HTMLDetailsElement).open)}>
-      <summary role="button" aria-label={`${displayName}的操作選單`} aria-expanded={menuOpen}><Icon name="more" size={18} /></summary>
+      <details ref={menuRef} className="card-menu" open={menuOpen} onToggle={(event) => setMenuOpen((event.currentTarget as HTMLDetailsElement).open)}>
+      <summary ref={menuSummaryRef} role="button" aria-label={`${displayName}的操作選單`} aria-expanded={menuOpen}><Icon name="more" size={18} /></summary>
         <div className="card-menu-popover" role="group" aria-label={`${displayName}操作`}>
-          <button type="button" onClick={() => { setMenuOpen(false); onEdit(); }}><Icon name="edit" size={15} />編輯</button>
-          <label className="menu-move"><Icon name="arrow" size={15} /><span>移至分區</span><select value={stock.groupId} aria-label={`移動 ${displayName} 至`} onChange={(event) => { setMenuOpen(false); onMove(event.target.value, 0); }}><option value={stock.groupId} disabled>選擇分區</option>{groups.filter((group) => group.id !== stock.groupId).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
-          <div className="menu-order"><button type="button" onClick={() => { setMenuOpen(false); onMove(stock.groupId, Math.max(0, stock.order - 1)); }}><Icon name="up" size={15} />上移</button><button type="button" onClick={() => { setMenuOpen(false); onMove(stock.groupId, stock.order + 1); }}><Icon name="down" size={15} />下移</button></div>
-          <button type="button" className="danger-action" onClick={() => { setMenuOpen(false); onRemove(); }}><Icon name="trash" size={15} />移除股票</button>
+          <button type="button" onClick={() => { setMenuOpen(false); onEdit(); }}><MenuActionIcon emoji="🖊️" />編輯</button>
+          <button type="button" onClick={() => { setMenuOpen(false); onSell(); }}><MenuActionIcon emoji="🏷️" />已賣出</button>
+          <label className="menu-move"><MenuActionIcon emoji="📂" /><span>移至分區</span><select value={stock.groupId} aria-label={`移動 ${displayName} 至`} onChange={(event) => { setMenuOpen(false); onMove(event.target.value, 0); }}><option value={stock.groupId} disabled>選擇分區</option>{groups.filter((group) => group.id !== stock.groupId).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+          <div className="menu-order"><button type="button" onClick={() => { setMenuOpen(false); onMove(stock.groupId, Math.max(0, stock.order - 1)); }}><MenuActionIcon emoji="⬆️" />上移</button><button type="button" onClick={() => { setMenuOpen(false); onMove(stock.groupId, stock.order + 1); }}><MenuActionIcon emoji="⬇️" />下移</button></div>
+          <button type="button" className="danger-action" onClick={() => { setMenuOpen(false); onRemove(); }}><MenuActionIcon emoji="🗑️" />移除股票</button>
         </div>
       </details>
       <div className="stock-name-block"><div className="stock-name" title={stock.customLabel ? stock.name : undefined}>{displayName}</div>{stock.customLabel && <div className="under-name">{stock.name}</div>}</div>

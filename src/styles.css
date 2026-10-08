@@ -87,6 +87,7 @@ a { color: inherit; }
 .stock-card { position: relative; min-width: 0; min-height: 236px; padding: 17px 18px 14px; border: 1px solid rgba(239, 243, 229, .18); border-radius: 18px; background: linear-gradient(145deg, rgba(13, 28, 23, .79), rgba(22, 39, 31, .71)); box-shadow: 0 15px 45px rgba(5, 13, 10, .17); backdrop-filter: blur(18px); transition: transform .18s ease, border-color .18s ease, background .18s ease; }.stock-card:hover { transform: translateY(-2px); border-color: rgba(220, 234, 209, .32); background: linear-gradient(145deg, rgba(13, 28, 23, .84), rgba(22, 39, 31, .78)); }.stock-card.is-dragging { opacity: .46; transform: scale(.98); }
 .stock-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.stock-id { min-width: 0; display: flex; align-items: center; gap: 8px; }.market-pill { min-width: 27px; padding: 4px 6px; border-radius: 6px; color: #293b31; background: #d8d4b6; font-size: 8px; font-weight: 750; line-height: 1; letter-spacing: .04em; text-align: center; }.market-pill.us { color: #233b32; background: #bbd6c2; }.stock-symbol { color: rgba(245, 244, 235, .8); font-size: 11px; letter-spacing: .08em; font-variant-numeric: tabular-nums; }.drag-grip { display: inline-flex; color: rgba(245,244,235,.28); cursor: grab; }.stock-name-block { min-height: 34px; margin-top: 9px; }.stock-name { overflow: hidden; color: rgba(245, 244, 235, .89); font-size: 13px; font-weight: 530; text-overflow: ellipsis; white-space: nowrap; }.under-name { margin-top: 2px; overflow: hidden; color: rgba(245, 244, 235, .46); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .card-menu { position: relative; }.card-menu summary { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: rgba(245, 244, 235, .68); cursor: pointer; list-style: none; }.card-menu summary::-webkit-details-marker { display: none; }.card-menu summary:hover { color: white; background: rgba(255,255,255,.1); }.card-menu-popover { position: absolute; z-index: 30; top: 34px; right: 0; width: 185px; padding: 6px; border: 1px solid rgba(245,244,235,.19); border-radius: 12px; background: #1a2c25; box-shadow: 0 14px 38px rgba(0,0,0,.36); }.card-menu-popover > button, .menu-move, .menu-order button { width: 100%; min-height: 33px; display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 0; border-radius: 7px; color: rgba(245,244,235,.86); background: transparent; font-size: 10px; text-align: left; }.card-menu-popover button:hover { background: rgba(255,255,255,.09); }.card-menu-popover .danger-action { color: #f6a29a; }.menu-move { position: relative; }.menu-move select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }.menu-order { display: flex; }.menu-order button { width: 50%; }
+.card-menu-action-icon { width: 15px; flex: 0 0 15px; text-align: center; font-size: 12px; line-height: 1; opacity: .82; }
 .price-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 6px; }.current-price { color: #faf9f3; font-size: clamp(23px, 2vw, 29px); font-weight: 480; letter-spacing: .015em; font-variant-numeric: tabular-nums; white-space: nowrap; }.price-placeholder { min-height: 32px; display: flex; align-items: center; color: rgba(245, 244, 235, .43); font-size: 13px; }
 .quote-status { display: inline-flex; align-items: center; gap: 5px; color: rgba(245, 244, 235, .47); font-size: 9px; white-space: nowrap; }.quote-status i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: #c9bb83; }.quote-status.live { color: #bad6c0; }.quote-status.live i { background: #93caa6; box-shadow: 0 0 8px rgba(147, 202, 166, .5); }.quote-status.stale { color: #e6bc8c; }.quote-status.stale i { background: #ddae70; }.quote-status.closed i { background: #babdaa; }.quote-status.credentials, .quote-status.invalid-symbol, .quote-status.network-error, .quote-status.rate-limited, .quote-status.provider-error { color: #e8a397; }.quote-status.credentials i, .quote-status.invalid-symbol i, .quote-status.network-error i, .quote-status.rate-limited i, .quote-status.provider-error i { background: #e28e83; }
 .day-move { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: rgba(245,244,235,.53); font-size: 9px; font-variant-numeric: tabular-nums; }.day-move b { font-size: 10px; font-weight: 590; }.up { color: var(--market-up-text) !important; }.down { color: var(--market-down-text) !important; }.flat { color: rgba(245, 244, 235, .7) !important; }
@@ -164,6 +165,71 @@ a { color: inherit; }
 
 /* Settings use a larger reading scale; portfolio cards keep their compact scale. */
 .settings-drawer { line-height: 1.5; }
+
+/* Local sale history */
+.portfolio-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.sales-history-toggle { min-height: 44px; padding: 0 13px; gap: 8px; border: 1px solid var(--line-strong); border-radius: 12px; color: var(--paper); background: var(--panel); font-size: 14px; line-height: 1.4; }
+.sales-history-toggle:hover { border-color: var(--sage); background: var(--theme-control-hover, var(--panel-solid)); }
+.sales-history-dialog { --sales-history-muted: var(--muted); width: min(100%, 860px); }
+.sales-history-dialog .dialog-header h2 { font-size: 24px; line-height: 1.35; }
+.sales-history-dialog .dialog-header p, .sale-form-dialog .dialog-header p { color: var(--sales-history-muted, var(--muted)); font-size: 14px; line-height: 1.5; }
+.sales-history-content { --sales-history-muted: var(--muted); min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: 18px 24px 22px; overflow-y: auto; color: var(--paper); font-size: 16px; line-height: 1.5; }
+.sales-history-toolbar { display: flex; align-items: center; gap: 12px; }
+.sales-history-toolbar label, .sales-history-restore-target label { color: var(--paper); font-size: 16px; font-weight: 550; }
+.sales-history-toolbar select, .sales-history-restore-target select { min-width: 170px; min-height: 44px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--paper); background: var(--theme-form-bg, var(--panel-solid)); font: inherit; }
+.sales-history-toolbar select option, .sales-history-restore-target select option { color: #17231e; background: #eff0e8; }
+.sales-history-list { display: grid; gap: 12px; }
+.sales-history-row { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--line-strong); border-radius: 16px; color: var(--paper); background: var(--panel); }
+.sales-history-row-heading, .sales-history-identity { display: flex; align-items: center; min-width: 0; gap: 12px; }
+.sales-history-row-heading { justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.sales-history-identity > div { min-width: 0; }
+.sales-history-identity h3 { overflow-wrap: anywhere; margin: 0; color: var(--paper); font-size: 17px; font-weight: 620; line-height: 1.4; }
+.sales-history-identity p { margin: 3px 0 0; color: var(--sales-history-muted); font-size: 15px; line-height: 1.4; }
+.sales-history-row-heading time { flex: none; color: var(--sales-history-muted); font-size: 15px; font-variant-numeric: tabular-nums; }
+.sales-history-details { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.sales-history-details > div { min-width: 0; }
+.sales-history-details dt { color: var(--sales-history-muted); font-size: 16px; line-height: 1.4; }
+.sales-history-details dd { overflow-wrap: anywhere; margin: 4px 0 0; color: var(--paper); font-size: 16px; font-weight: 560; font-variant-numeric: tabular-nums; line-height: 1.4; }
+.sales-history-details .gain-positive { color: var(--market-up-text); }
+.sales-history-details .gain-negative { color: var(--market-down-text); }
+.sales-history-restore-target { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 220px); align-items: center; gap: 10px; padding-top: 4px; }
+.sales-history-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+.sales-history-actions .primary-button, .sales-history-actions .secondary-button { min-height: 44px; padding-inline: 14px; font-size: 14px; }
+.sales-history-empty { display: grid; min-height: 150px; margin: 0; place-items: center; border: 1px dashed var(--line-strong); border-radius: 14px; color: var(--sales-history-muted); font-size: 16px; text-align: center; }
+.sales-history-retention { margin: 0; color: var(--sales-history-muted); font-size: 14px; line-height: 1.5; }
+.sale-form-dialog { --sales-history-muted: var(--muted); width: min(100%, 500px); }
+.sale-form-dialog .required-marker { margin-left: 2px; color: var(--red); font-size: 19px; font-weight: 700; line-height: 1; }
+.sale-form { gap: 10px; }
+.sale-form-stock { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.sale-form-stock > div { display: grid; gap: 2px; min-width: 0; }
+.sale-form-stock b { overflow-wrap: anywhere; color: var(--paper); font-size: 16px; }
+.sale-form-stock span:not(.market-pill) { color: var(--sales-history-muted, var(--muted)); font-size: 15px; }
+.sale-form label { display: block; color: var(--paper); font-size: 16px; }
+.sale-form input { min-height: 48px !important; color: var(--paper) !important; background: var(--theme-form-bg, var(--panel-solid)) !important; font-size: 17px !important; }
+.sale-form { --sales-history-muted: var(--muted); }
+.sale-form .form-note { color: var(--sales-history-muted); font-size: 14px; line-height: 1.5; }
+.sale-form .form-error { font-size: 15px; }
+.sale-form .form-actions { margin-top: 8px; }
+.sale-form .form-actions .primary-button, .sale-form .form-actions .secondary-button { min-height: 46px; font-size: 14px; }
+.sales-history-toggle:focus-visible, .sales-history-toolbar select:focus-visible, .sales-history-restore-target select:focus-visible, .sales-history-actions button:focus-visible, .sale-form input:focus-visible, .sale-form button:focus-visible { outline: 3px solid var(--focus-color); outline-offset: 2px; }
+:is(html[data-theme="sand"], html[data-theme="sky"]) .sales-history-dialog, :is(html[data-theme="sand"], html[data-theme="sky"]) .sales-history-content, :is(html[data-theme="sand"], html[data-theme="sky"]) .sale-form-dialog, :is(html[data-theme="sand"], html[data-theme="sky"]) .sale-form { --sales-history-muted: var(--paper); }
+
+@media (max-width: 700px) {
+  .portfolio-heading-actions { gap: 7px; }
+  .sales-history-toggle { min-height: 44px; padding-inline: 9px; font-size: 13px; }
+  .sales-history-content { padding: 14px 17px 18px; }
+  .sales-history-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .portfolio-heading { align-items: center; }
+  .portfolio-heading-actions { flex-wrap: wrap; }
+  .sales-history-row { padding: 13px; }
+  .sales-history-restore-target { grid-template-columns: 1fr; }
+  .sales-history-restore-target select { width: 100%; }
+  .sales-history-actions { flex-wrap: wrap; }
+  .sales-history-actions button { flex: 1 1 145px; }
+}
 .settings-drawer .dialog-header h2 { font-size: 24px; line-height: 1.35; }
 .settings-drawer .dialog-header p { font-size: 14px; line-height: 1.5; }
 .settings-drawer .settings-section { gap: 15px; padding-block: 23px; }
@@ -221,6 +287,8 @@ a { color: inherit; }
   box-shadow: inset 0 0 0 1px rgba(252, 206, 145, .16), 0 12px 34px rgba(124, 42, 34, .17);
 }
 .stock-card.is-limit-up:hover { border-color: rgba(255, 193, 143, .82); background: linear-gradient(145deg, rgba(78, 40, 34, .72), rgba(57, 45, 33, .77)); }
+.stock-card:has(.card-menu[open]) { z-index: 2; }
+.stock-card:has(.card-menu[open]) > .stock-card-top { z-index: 2; }
 .stock-card.is-limit-up > .stock-card-top,
 .stock-card.is-limit-up > .stock-values-row,
 .stock-card.is-limit-up > .quote-error-note,

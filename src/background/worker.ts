@@ -319,10 +319,18 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   });
 });
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'STATE_CAPABILITIES') {
+    sendResponse({ capabilities: ['sales-history-v1'] });
+    return false;
+  }
   if (message?.type === 'STATE_MUTATE') {
     void enqueue(async () => {
       const operation = message.operation as StateOperation;
       let previous = await loadState();
+      // Validate and apply once before touching sync metadata. Invalid or unknown
+      // operations must never reach reconciliation or any storage write.
+      const validatedNext = applyOperation(previous, operation);
+      if (operation.type === 'prune-sales-history' && validatedNext.salesHistory.length === previous.salesHistory.length) return previous;
       let metadata = await readAccountSyncMetadata();
       if (previous.settings.accountSyncEnabled && !metadata.initialized && !metadata.conflict) {
         previous = await reconcileAccountSync(previous);

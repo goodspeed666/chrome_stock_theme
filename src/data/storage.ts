@@ -1,4 +1,5 @@
 import { DEFAULT_STATE, normalizeAppearanceTheme, type AppState } from '../domain/types';
+import { createSaleRecord, normalizeSalesHistory, pruneSalesHistory, validateSale } from '../domain/salesHistory';
 
 export const STATE_KEY = 'stockDesktopState.v1';
 const LOCAL_KEY = STATE_KEY;
@@ -12,6 +13,7 @@ function normalizeState(value: unknown): AppState {
     ...state,
     groups: Array.isArray(state.groups) ? state.groups : structuredClone(DEFAULT_STATE.groups),
     stocks: Array.isArray(state.stocks) ? state.stocks : [],
+    salesHistory: normalizeSalesHistory(state.salesHistory),
     settings: {
       ...DEFAULT_STATE.settings,
       ...state.settings,
@@ -46,6 +48,10 @@ export interface StateAdapter {
 export type StateOperation =
   | { type: 'replace'; state: AppState }
   | { type: 'add-stock'; stock: AppState['stocks'][number] }
+  | { type: 'sell-stock'; stockId: string; recordId: string; salePrice: number; saleDate: string }
+  | { type: 'edit-sale'; recordId: string; salePrice: number; saleDate: string }
+  | { type: 'restore-sale'; recordId: string; stockId: string; groupId?: string }
+  | { type: 'prune-sales-history' }
   | { type: 'update-stock'; stock: AppState['stocks'][number] }
   | { type: 'patch-stock'; stockId: string; patch: Partial<AppState['stocks'][number]> }
   | { type: 'delete-stock'; stockId: string }
@@ -60,8 +66,59 @@ export type StateOperation =
   | { type: 'update-background'; background: Partial<AppState['background']> }
   | { type: 'clear-notification-failure'; stockId: string };
 
+const HISTORY_MUTATION_TYPES = new Set<StateOperation['type']>([
+  'sell-stock',
+  'edit-sale',
+  'restore-sale',
+  'prune-sales-history',
+]);
+const SALES_HISTORY_CAPABILITY = 'sales-history-v1';
+const SALES_HISTORY_WORKER_ERROR = '擴充功能背景服務版本過舊或沒有回應，請重新載入擴充功能後再試。';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function requireString(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function assertValidStateOperation(value: unknown): asserts value is StateOperation {
+  if (!isRecord(value) || typeof value.type !== 'string') throw new Error('不支援或格式錯誤的狀態操作');
+  const operation = value;
+  const valid = (() => {
+    switch (operation.type) {
+      case 'replace': return isRecord(operation.state) && operation.state.version === 1;
+      case 'add-stock':
+      case 'update-stock': return isRecord(operation.stock) && requireString(operation.stock.id) && requireString(operation.stock.groupId);
+      case 'sell-stock': return requireString(operation.stockId) && requireString(operation.recordId) && typeof operation.salePrice === 'number' && typeof operation.saleDate === 'string';
+      case 'edit-sale': return requireString(operation.recordId) && typeof operation.salePrice === 'number' && typeof operation.saleDate === 'string';
+      case 'restore-sale': return requireString(operation.recordId) && requireString(operation.stockId) && (operation.groupId === undefined || requireString(operation.groupId));
+      case 'prune-sales-history': return true;
+      case 'patch-stock': return requireString(operation.stockId) && isRecord(operation.patch);
+      case 'delete-stock':
+      case 'clear-notification-failure': return requireString(operation.stockId);
+      case 'reorder-stocks': return requireString(operation.groupId) && Array.isArray(operation.stockIds) && operation.stockIds.every(requireString);
+      case 'place-stock': return requireString(operation.stockId) && requireString(operation.groupId) && typeof operation.index === 'number' && Number.isFinite(operation.index);
+      case 'add-group':
+      case 'update-group': return isRecord(operation.group) && requireString(operation.group.id);
+      case 'reorder-groups': return Array.isArray(operation.groupIds) && operation.groupIds.every(requireString);
+      case 'delete-group': return requireString(operation.groupId)
+        && (operation.moveToGroupId === undefined || requireString(operation.moveToGroupId))
+        && (operation.deleteStocks === undefined || typeof operation.deleteStocks === 'boolean');
+      case 'update-settings': return isRecord(operation.settings);
+      case 'update-notification-settings': return typeof operation.notificationsEnabled === 'boolean' && typeof operation.notificationPermission === 'string';
+      case 'update-background': return isRecord(operation.background);
+      default: return false;
+    }
+  })();
+  if (!valid) throw new Error('不支援或格式錯誤的狀態操作');
+}
+
 function applyOperation(previous: AppState, operation: StateOperation): AppState {
+  assertValidStateOperation(operation);
   const next = structuredClone(previous);
+  next.salesHistory = pruneSalesHistory(next.salesHistory);
   switch (operation.type) {
     case 'replace': return normalizeState(operation.state);
     case 'add-stock': {
@@ -69,6 +126,58 @@ function applyOperation(previous: AppState, operation: StateOperation): AppState
       const stock = { ...operation.stock, order: stocks.filter((candidate) => candidate.groupId === operation.stock.groupId).length };
       return { ...next, stocks: [...stocks, stock] };
     }
+    case 'sell-stock': {
+      const validation = validateSale(operation.salePrice, operation.saleDate);
+      if (validation) throw new Error(validation);
+      const stock = next.stocks.find((candidate) => candidate.id === operation.stockId);
+      if (!stock) throw new Error('找不到要標記為已賣出的股票');
+      if (next.salesHistory.some((record) => record.id === operation.recordId)) throw new Error('這筆售出記錄已存在，請重新整理後再試');
+      const group = next.groups.find((candidate) => candidate.id === stock.groupId);
+      if (!group) throw new Error('找不到股票原本所屬的分區');
+      const record = createSaleRecord(operation.recordId, stock, group.name, operation.salePrice, operation.saleDate);
+      const remaining = next.stocks.filter((candidate) => candidate.id !== stock.id);
+      return {
+        ...next,
+        stocks: reindexGroup(remaining, stock.groupId),
+        salesHistory: [...next.salesHistory, record],
+      };
+    }
+    case 'edit-sale': {
+      const validation = validateSale(operation.salePrice, operation.saleDate);
+      if (validation) throw new Error(validation);
+      const index = next.salesHistory.findIndex((record) => record.id === operation.recordId);
+      if (index < 0) throw new Error('找不到這筆售出記錄，可能已超過保留期間');
+      const salesHistory = [...next.salesHistory];
+      salesHistory[index] = { ...salesHistory[index]!, salePrice: operation.salePrice, saleDate: operation.saleDate };
+      return { ...next, salesHistory };
+    }
+    case 'restore-sale': {
+      const record = next.salesHistory.find((candidate) => candidate.id === operation.recordId);
+      if (!record) throw new Error('找不到這筆售出記錄，可能已超過保留期間');
+      if (typeof operation.stockId !== 'string' || !operation.stockId.trim() || operation.stockId.length > 100 || next.stocks.some((stock) => stock.id === operation.stockId)) {
+        throw new Error('股票識別碼無效或已被使用，售出記錄仍保留');
+      }
+      const originalGroup = next.groups.find((group) => group.id === record.stock.groupId);
+      const targetGroup = originalGroup ?? next.groups.find((group) => group.id === operation.groupId);
+      if (!targetGroup) throw new Error('原分區已不存在，請選擇有效的目的分區');
+      const order = next.stocks.filter((stock) => stock.groupId === targetGroup.id).reduce((maximum, stock) => Math.max(maximum, stock.order), -1) + 1;
+      const providerKey = record.stock.market === 'TW' ? next.settings.fugleKey : next.settings.finnhubKey;
+      const hasKey = typeof providerKey === 'string' && providerKey.trim().length > 0;
+      const restored: AppState['stocks'][number] = {
+        ...record.stock,
+        id: operation.stockId,
+        groupId: targetGroup.id,
+        order,
+        alertLatches: { above: false, below: false },
+        quoteStatus: hasKey ? 'no-trade' : 'not-connected',
+      };
+      return {
+        ...next,
+        stocks: [...next.stocks, restored],
+        salesHistory: next.salesHistory.filter((candidate) => candidate.id !== record.id),
+      };
+    }
+    case 'prune-sales-history': return { ...next, salesHistory: pruneSalesHistory(next.salesHistory) };
     case 'update-stock': return { ...next, stocks: next.stocks.map((stock) => stock.id === operation.stock.id ? operation.stock : stock) };
     case 'patch-stock': return { ...next, stocks: next.stocks.map((stock) => stock.id === operation.stockId ? { ...stock, ...operation.patch } : stock) };
     case 'delete-stock': {
@@ -117,6 +226,7 @@ function applyOperation(previous: AppState, operation: StateOperation): AppState
     };
     case 'update-background': return { ...next, background: { ...next.background, ...operation.background } };
     case 'clear-notification-failure': return { ...next, stocks: next.stocks.map((stock) => stock.id === operation.stockId ? { ...stock, notificationFailure: undefined } : stock) };
+    default: throw new Error('不支援的狀態操作');
   }
 }
 
@@ -150,6 +260,7 @@ export class ChromeStateAdapter implements StateAdapter {
     throw new Error('背景服務暫時沒有回應，請重試');
   }
   async mutate(operation: StateOperation): Promise<AppState> {
+    if (HISTORY_MUTATION_TYPES.has(operation.type)) await requireSalesHistoryWorker();
     const response = await chrome.runtime.sendMessage({ type: 'STATE_MUTATE', operation });
     if (response?.state) return normalizeState(response.state);
     throw new Error(response?.error ?? '背景服務暫時沒有回應，請重試');
@@ -160,6 +271,25 @@ export class ChromeStateAdapter implements StateAdapter {
     };
     chrome.storage.onChanged.addListener(handle);
     return () => chrome.storage.onChanged.removeListener(handle);
+  }
+}
+
+async function requireSalesHistoryWorker(): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const response = await Promise.race([
+      chrome.runtime.sendMessage({ type: 'STATE_CAPABILITIES' }),
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Capability handshake timed out')), 1500);
+      }),
+    ]);
+    if (!Array.isArray(response?.capabilities) || !response.capabilities.includes(SALES_HISTORY_CAPABILITY)) {
+      throw new Error('Capability handshake was not supported');
+    }
+  } catch {
+    throw new Error(SALES_HISTORY_WORKER_ERROR);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
 }
 

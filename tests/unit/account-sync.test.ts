@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_STATE, type AppState } from '../../src/domain/types';
+import { DEFAULT_STATE, type AppState, type SaleRecord } from '../../src/domain/types';
+import { taipeiDate } from '../../src/domain/salesHistory';
 import {
   ACCOUNT_SYNC_MAX_BYTES,
   createAccountSyncSnapshot,
@@ -34,9 +35,21 @@ function sampleState(): AppState {
   };
 }
 
+function localSaleRecord(): SaleRecord {
+  return {
+    id: 'sale-local-only',
+    stock: { id: 'sold-stock', market: 'TW', symbol: '2330', name: '台積電', order: 0, groupId: 'group-tw', averageCost: 500, shares: 20, gainDisplay: 'money', alert: { above: 700 } },
+    originalGroupName: '台股自選',
+    salePrice: 650.125,
+    saleDate: taipeiDate(),
+  };
+}
+
 describe('Chrome account sync snapshots', () => {
   it('exports only the allowlisted portfolio and safe preferences', () => {
-    const snapshot = createAccountSyncSnapshot(sampleState(), { deviceId: 'device-a', revision: 4, updatedAt: 1_800_000_000_000 });
+    const state = sampleState();
+    state.salesHistory = [localSaleRecord()];
+    const snapshot = createAccountSyncSnapshot(state, { deviceId: 'device-a', revision: 4, updatedAt: 1_800_000_000_000 });
     const serialized = JSON.stringify(snapshot);
 
     expect(snapshot.stocks[0]).toEqual({
@@ -45,6 +58,8 @@ describe('Chrome account sync snapshots', () => {
     });
     expect(snapshot.settings).toEqual({ welcomeManuallyHidden: false, limitNotificationsEnabled: true, quoteRefreshSeconds: 30, appearanceTheme: 'forest' });
     expect(snapshot.background).toEqual({ selectedId: 'scene-01', brightness: 0.58 });
+    expect(snapshot).not.toHaveProperty('salesHistory');
+    expect(serialized).not.toContain('sale-local-only');
     for (const secretOrLocalOnly of ['do-not-sync-fugle-secret', 'do-not-sync-finnhub-secret', 'notificationsEnabled', 'notificationPermission', '"quote":', 'pendingNotification', 'alertLatches', '"selectedId":"custom"']) {
       expect(serialized).not.toContain(secretOrLocalOnly);
     }
@@ -80,6 +95,7 @@ describe('Chrome account sync snapshots', () => {
 
   it('merges synced fields while retaining local credentials and matching local runtime quotes', () => {
     const local = sampleState();
+    local.salesHistory = [localSaleRecord()];
     const remoteSource = structuredClone(local);
     remoteSource.stocks[0]!.customLabel = '遠端名稱';
     remoteSource.stocks[0]!.alert = { below: 550 };
@@ -104,6 +120,7 @@ describe('Chrome account sync snapshots', () => {
     expect(merged.stocks[0]!.notificationFailure).toBeUndefined();
     expect(merged.stocks[0]!.pendingLimitNotification).toBeUndefined();
     expect(merged.stocks[0]!.limitNotificationFailure).toBeUndefined();
+    expect(merged.salesHistory).toEqual(local.salesHistory);
 
     const builtInLocal = { ...local, background: { selectedId: 'scene-01', brightness: 0.58 } };
     expect(mergeAccountSyncSnapshot(builtInLocal, remote).background).toEqual({ selectedId: 'scene-02', brightness: 0.45 });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Dialog } from '../../src/components/Dialog';
 import { StockCard } from '../../src/components/StockCard';
 import type { Stock } from '../../src/domain/types';
@@ -24,6 +24,8 @@ const staleStock: Stock = {
 };
 
 describe('dialog and quote error feedback', () => {
+  afterEach(() => cleanup());
+
   it('keeps the active form field focused across external state renders', async () => {
     const user = userEvent.setup();
     render(<FocusHarness />);
@@ -58,6 +60,44 @@ describe('dialog and quote error feedback', () => {
     expect(within(card).getByText('+124.56')).toBeVisible();
     expect(within(card).getByText('高於 US$139.49')).toBeVisible();
     expect(within(card).getByText('低於 US$105.25')).toBeVisible();
+  });
+
+  it('closes the card menu on an outside click without blocking that click', async () => {
+    const user = userEvent.setup();
+    const noop = vi.fn();
+    const outsideAction = vi.fn();
+    render(<>
+      <button type="button" onClick={outsideAction}>Outside action</button>
+      <StockCard stock={staleStock} groups={[{ id: 'group-tw', name: '台股', order: 0 }]} onEdit={noop} onSell={noop} onRemove={noop} onMove={noop} onGainDisplayChange={noop} onRetryNotification={noop} onDragStart={noop} onDrop={noop} dragging={false} />
+    </>);
+
+    const summary = screen.getByRole('button', { name: '台積電的操作選單' });
+    const details = summary.closest('details') as HTMLDetailsElement;
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+    expect(screen.getByRole('button', { name: '已賣出' })).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Outside action' }));
+
+    expect(outsideAction).toHaveBeenCalledOnce();
+    expect(details).not.toHaveAttribute('open');
+  });
+
+  it('closes the card menu on Escape and returns focus to its summary', async () => {
+    const user = userEvent.setup();
+    const noop = vi.fn();
+    render(<StockCard stock={staleStock} groups={[{ id: 'group-tw', name: '台股', order: 0 }]} onEdit={noop} onSell={noop} onRemove={noop} onMove={noop} onGainDisplayChange={noop} onRetryNotification={noop} onDragStart={noop} onDrop={noop} dragging={false} />);
+
+    const summary = screen.getByRole('button', { name: '台積電的操作選單' });
+    const details = summary.closest('details') as HTMLDetailsElement;
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+    const sellAction = screen.getByRole('button', { name: '已賣出' });
+    sellAction.focus();
+    await user.keyboard('{Escape}');
+
+    expect(details).not.toHaveAttribute('open');
+    expect(summary).toHaveFocus();
   });
 
   it('retains Taiwan truncation for prices and alert thresholds at or above 100', () => {

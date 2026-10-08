@@ -71,6 +71,14 @@ export interface StockGroup {
   order: number;
 }
 
+export interface SaleRecord {
+  id: string;
+  stock: Pick<Stock, 'id' | 'market' | 'symbol' | 'name' | 'customLabel' | 'order' | 'groupId' | 'averageCost' | 'shares' | 'gainDisplay' | 'alert'>;
+  originalGroupName: string;
+  salePrice: number;
+  saleDate: string;
+}
+
 export interface BackgroundSettings {
   selectedId: string;
   brightness: number;
@@ -92,6 +100,7 @@ export interface AppState {
   version: 1;
   groups: StockGroup[];
   stocks: Stock[];
+  salesHistory: SaleRecord[];
   settings: AppSettings;
   background: BackgroundSettings;
   lastRefreshAt?: number;
@@ -104,6 +113,7 @@ export const DEFAULT_STATE: AppState = {
     { id: 'group-us', name: '美股', order: 1 },
   ],
   stocks: [],
+  salesHistory: [],
   settings: {
     fugleKey: '',
     finnhubKey: '',

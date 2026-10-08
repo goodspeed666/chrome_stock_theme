@@ -60,6 +60,11 @@ describe('local and worker mutation semantics', () => {
     expect(state.settings.fugleKey).toBe('');
   });
 
+  it('throws for unknown or malformed worker operations instead of returning a resettable state', () => {
+    const malformed = { type: 'future-worker-operation' } as never;
+    expect(() => applyOperation(structuredClone(DEFAULT_STATE), malformed)).toThrow('不支援或格式錯誤的狀態操作');
+  });
+
   it('backfills the persistent welcome hide flag for existing v1 storage', () => {
     const oldSettings = { ...DEFAULT_STATE.settings };
     Reflect.deleteProperty(oldSettings, 'welcomeManuallyHidden');

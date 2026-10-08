@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createStateAdapter, type StateOperation } from './data/storage';
 import { loadBackgroundCatalog, type BackgroundImage } from './data/backgrounds';
 import { readUploadedBackground, subscribeToBackgroundUpdates } from './data/images';
-import { DEFAULT_STATE, type AppState, type Market, type Stock, type StockGroup } from './domain/types';
+import { DEFAULT_STATE, type AppState, type Market, type SaleRecord, type Stock, type StockGroup } from './domain/types';
 import { formatTaipeiCalendarDate, getTaipeiGreeting } from './domain/calendar';
+import { pruneSalesHistory, taipeiDate } from './domain/salesHistory';
 import { shouldHideWelcome } from './domain/marketHours';
 import { resetAlertLatches } from './domain/alerts';
 import { Dialog } from './components/Dialog';
@@ -11,6 +12,8 @@ import { Icon } from './components/Icons';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { StockCard } from './components/StockCard';
 import { StockFormDialog, type StockDraft } from './components/StockFormDialog';
+import { SaleFormDialog } from './components/SaleFormDialog';
+import { SalesHistoryDialog } from './components/SalesHistoryDialog';
 
 const adapter = createStateAdapter();
 const APP_VERSION = __APP_VERSION__;
@@ -103,9 +106,14 @@ export default function App() {
   const [stockDialog, setStockDialog] = useState<{ stock?: Stock; groupId?: string } | null>(null);
   const [groupDialog, setGroupDialog] = useState<{ group?: StockGroup } | null>(null);
   const [deleteGroup, setDeleteGroup] = useState<StockGroup | null>(null);
+  const [saleDialog, setSaleDialog] = useState<{ stock: SaleRecord['stock']; salePrice?: number; saleDate?: string; recordId?: string } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState<'recent' | string>('recent');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const displayedDate = formatTaipeiCalendarDate(dateNow);
+  const today = taipeiDate(dateNow);
+  const prunedDate = useRef<string | null>(null);
 
   const persist = useCallback(async (operation: StateOperation) => {
     try {
@@ -133,6 +141,13 @@ export default function App() {
     const unsubscribe = adapter.subscribe((next) => { if (mounted) setState(next); });
     return () => { mounted = false; unsubscribe(); };
   }, []);
+
+  useEffect(() => {
+    if (loading || prunedDate.current === today) return;
+    prunedDate.current = today;
+    if (pruneSalesHistory(state.salesHistory, today).length === state.salesHistory.length) return;
+    void persist({ type: 'prune-sales-history' });
+  }, [loading, persist, state.salesHistory, today]);
 
   useEffect(() => {
     const updateDate = () => setDateNow(new Date());
@@ -204,6 +219,30 @@ export default function App() {
     if (!window.confirm(`確定移除 ${stock.customLabel || stock.name}（${stock.symbol}）嗎？`)) return;
     const result = await persist({ type: 'delete-stock', stockId: stock.id });
     if (result) setToast(`${stock.symbol} 已移除。`);
+  }
+
+  async function saveSale(salePrice: number, saleDate: string): Promise<boolean> {
+    if (!saleDialog) return false;
+    const operation: StateOperation = saleDialog.recordId
+      ? { type: 'edit-sale', recordId: saleDialog.recordId, salePrice, saleDate }
+      : { type: 'sell-stock', stockId: saleDialog.stock.id, recordId: crypto.randomUUID(), salePrice, saleDate };
+    const result = await persist(operation);
+    if (!result) return false;
+    setSaleDialog(null);
+    if (operation.type === 'edit-sale') {
+      setHistoryOpen(true);
+      setToast(`${saleDialog.stock.symbol} 的賣出資料已更新。`);
+    } else {
+      setToast(`${saleDialog.stock.symbol} 已移至歷史記錄。`);
+    }
+    return true;
+  }
+
+  async function restoreSale(record: SaleRecord, groupId?: string): Promise<boolean> {
+    const result = await persist({ type: 'restore-sale', recordId: record.id, stockId: crypto.randomUUID(), ...(groupId ? { groupId } : {}) });
+    if (!result) return false;
+    setToast(`${record.stock.symbol} 已還原至投資組合。`);
+    return true;
   }
 
   async function saveGroup(name: string) {
@@ -297,11 +336,11 @@ export default function App() {
       </section>)}
 
       <section className="portfolio" aria-label="股票分區">
-        <div className="portfolio-heading"><div><p className="eyebrow">我的觀察清單</p><h2>你的投資組合 <span>{state.stocks.length.toString().padStart(2, '0')}</span></h2></div><button type="button" className="text-action add-group-action" onClick={() => setGroupDialog({})}><Icon name="plus" size={15} />新增分區</button></div>
+        <div className="portfolio-heading"><div><p className="eyebrow">我的觀察清單</p><h2>你的投資組合 <span>{state.stocks.length.toString().padStart(2, '0')}</span></h2></div><div className="portfolio-heading-actions"><button type="button" className="text-action sales-history-toggle" onClick={() => setHistoryOpen(true)}><Icon name="clock" size={16} />歷史記錄</button><button type="button" className="text-action add-group-action" onClick={() => setGroupDialog({})}><Icon name="plus" size={15} />新增分區</button></div></div>
         {loading && <p className="loading-note">正在載入本機資料…</p>}
         {groupsWithStocks.map((group, groupIndex) => <section key={group.id} className="stock-group" aria-label={`${group.name}分區`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const stock = state.stocks.find((item) => item.id === draggingId); if (stock && stock.groupId !== group.id) void moveStock(stock, group.id, group.stocks.length); setDraggingId(null); }}>
           <header className="group-header"><div className="group-title"><span className={`group-marker ${group.id === 'group-us' ? 'us' : ''}`} /><h2>{group.name}</h2><span className="group-count">{group.stocks.length}</span></div><div className="group-actions"><button type="button" className="mini-icon-button" aria-label={`將${group.name}分區上移`} onClick={() => void changeGroupOrder(group, -1)} disabled={groupIndex === 0}><Icon name="up" size={15} /></button><button type="button" className="mini-icon-button" aria-label={`將${group.name}分區下移`} onClick={() => void changeGroupOrder(group, 1)} disabled={groupIndex === sortedGroups.length - 1}><Icon name="down" size={15} /></button><button type="button" className="mini-icon-button" aria-label={`重新命名${group.name}分區`} onClick={() => setGroupDialog({ group })}><Icon name="edit" size={15} /></button><button type="button" className="mini-icon-button danger-icon" aria-label={`刪除${group.name}分區`} disabled={state.groups.length < 2} onClick={() => setDeleteGroup(group)}><Icon name="trash" size={15} /></button><button type="button" className="group-add" onClick={() => setStockDialog({ groupId: group.id })}><Icon name="plus" size={14} />加入股票</button></div></header>
-          {group.stocks.length ? <div className="stock-grid">{group.stocks.map((stock) => <StockCard key={stock.id} stock={stock} groups={sortedGroups} dragging={draggingId === stock.id} onEdit={() => setStockDialog({ stock })} onRemove={() => void removeStock(stock)} onMove={(targetId, index) => void moveStock(stock, targetId, index)} onGainDisplayChange={() => void persist({ type: 'patch-stock', stockId: stock.id, patch: { gainDisplay: stock.gainDisplay === 'percent' ? 'money' : 'percent' } })} onRetryNotification={() => void retryNotification(stock)} onDragStart={() => setDraggingId(stock.id)} onDrop={(index) => { const source = state.stocks.find((item) => item.id === draggingId); if (source) void moveStock(source, stock.groupId, index); setDraggingId(null); }} />)}</div> : <div className="group-empty"><div className="empty-symbol"><Icon name={group.id === 'group-us' ? 'candles' : 'chart'} size={18} /></div><div><b>尚未加入股票</b><p>加入追蹤清單，讓重要報價一目了然。</p></div><button type="button" className="text-action" onClick={() => setStockDialog({ groupId: group.id })}>新增一檔<Icon name="arrow" size={14} /></button></div>}
+          {group.stocks.length ? <div className="stock-grid">{group.stocks.map((stock) => <StockCard key={stock.id} stock={stock} groups={sortedGroups} dragging={draggingId === stock.id} onEdit={() => setStockDialog({ stock })} onSell={() => setSaleDialog({ stock, ...(stock.quote ? { salePrice: stock.quote.price } : {}) })} onRemove={() => void removeStock(stock)} onMove={(targetId, index) => void moveStock(stock, targetId, index)} onGainDisplayChange={() => void persist({ type: 'patch-stock', stockId: stock.id, patch: { gainDisplay: stock.gainDisplay === 'percent' ? 'money' : 'percent' } })} onRetryNotification={() => void retryNotification(stock)} onDragStart={() => setDraggingId(stock.id)} onDrop={(index) => { const source = state.stocks.find((item) => item.id === draggingId); if (source) void moveStock(source, stock.groupId, index); setDraggingId(null); }} />)}</div> : <div className="group-empty"><div className="empty-symbol"><Icon name={group.id === 'group-us' ? 'candles' : 'chart'} size={18} /></div><div><b>尚未加入股票</b><p>加入追蹤清單，讓重要報價一目了然。</p></div><button type="button" className="text-action" onClick={() => setStockDialog({ groupId: group.id })}>新增一檔<Icon name="arrow" size={14} /></button></div>}
         </section>)}
         {!sortedGroups.length && <div className="no-groups"><p>尚未建立分區</p><button className="secondary-button" onClick={() => setGroupDialog({})}>新增第一個分區</button></div>}
       </section>
@@ -316,5 +355,7 @@ export default function App() {
     {groupDialog && <GroupForm group={groupDialog.group} onClose={() => setGroupDialog(null)} onSave={(name) => void saveGroup(name)} />}
     {deleteGroup && <DeleteGroupDialog group={deleteGroup} count={state.stocks.filter((stock) => stock.groupId === deleteGroup.id).length} groups={sortedGroups.filter((group) => group.id !== deleteGroup.id)} onClose={() => setDeleteGroup(null)} onConfirm={(targetId, deleteStocks) => void deleteCurrentGroup(targetId, deleteStocks)} />}
     {settingsOpen && <SettingsDrawer state={state} backgrounds={catalog} hasBackground={Boolean(customBackgroundUrl)} onClose={() => setSettingsOpen(false)} onSaveKeys={async (fugleKey, finnhubKey) => { const result = await persist({ type: 'update-settings', settings: { fugleKey, finnhubKey } }); if (!result) throw new Error('儲存 API 金鑰失敗'); }} onSettingsChange={async (settings) => { const result = await persist({ type: 'update-settings', settings }); if (!result) throw new Error('儲存設定失敗'); }} onBackgroundChange={async (selectedId, brightness) => { const result = await persist({ type: 'update-background', background: { selectedId, brightness } }); if (!result) throw new Error('儲存背景設定失敗'); }} onRestoreWelcome={async () => { const result = await persist({ type: 'update-settings', settings: { welcomeManuallyHidden: false } }); if (!result) throw new Error('恢復問候區自動顯示失敗'); }} onTestNotification={testNotification} onNotificationChange={saveNotificationSettings} />}
+    {historyOpen && <SalesHistoryDialog records={state.salesHistory} groups={sortedGroups} filter={historyFilter} today={today} onFilterChange={setHistoryFilter} onClose={() => setHistoryOpen(false)} onEdit={(record) => { setHistoryOpen(false); setSaleDialog({ stock: record.stock, salePrice: record.salePrice, saleDate: record.saleDate, recordId: record.id }); }} onRestore={restoreSale} />}
+    {saleDialog && <SaleFormDialog stock={saleDialog.stock} salePrice={saleDialog.salePrice} saleDate={saleDialog.saleDate} editing={Boolean(saleDialog.recordId)} today={today} onClose={() => { const returnToHistory = Boolean(saleDialog.recordId); setSaleDialog(null); if (returnToHistory) setHistoryOpen(true); }} onSave={saveSale} />}
   </main>;
 }
